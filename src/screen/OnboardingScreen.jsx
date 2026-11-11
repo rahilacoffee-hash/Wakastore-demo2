@@ -279,107 +279,6 @@ export default function Onboarding({ onFinish }) {
     },
   });
 
-  /* ---------- Mobile: photo panel + bottom sheet (SmartFixer-style) ---------- */
-
-  if (!isDesktop) {
-    return (
-      <main
-        className="flex h-[100dvh] w-full flex-col overflow-hidden bg-white text-[#171717]"
-        onTouchStart={handleTouchStart}
-        onTouchEnd={handleTouchEnd}
-      >
-        <div className="relative min-h-0 flex-[1.15] overflow-hidden rounded-b-[32px] bg-[#B90013]">
-          {SLIDES.map((item, index) => (
-            <img
-              key={item.image}
-              src={item.image}
-              alt=""
-              aria-hidden="true"
-              className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-500 motion-reduce:transition-none ${
-                index === step ? "opacity-100" : "opacity-0"
-              }`}
-              style={{ objectPosition: item.posMobile }}
-            />
-          ))}
-          <div className="absolute inset-x-0 top-0 h-28 bg-gradient-to-b from-black/45 to-transparent" />
-          <div className="absolute left-5 top-[max(18px,env(safe-area-inset-top))] [&_img]:h-7 [&_img]:w-auto [&_img]:brightness-0 [&_img]:invert">
-            <WakastoreLogo />
-          </div>
-          <button
-            type="button"
-            onClick={finishOnboarding}
-            className="absolute right-4 top-[max(14px,env(safe-area-inset-top))] h-10 rounded-full bg-white/20 px-4 text-sm font-semibold text-white backdrop-blur"
-          >
-            Skip
-          </button>
-        </div>
-
-        <section className="shrink-0 px-6 pb-[max(20px,env(safe-area-inset-bottom))] pt-6">
-          <AnimatePresence mode="wait">
-            <motion.div
-              key={`m-${step}`}
-              initial={reduce ? false : { opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, ease: EASE }}
-            >
-              <p className="text-xs font-extrabold uppercase tracking-[0.14em] text-[#ED0018]">
-                {currentSlide.eyebrow}
-              </p>
-              <h1 className="mt-2 font-[Manrope] text-[28px] font-extrabold leading-[1.1] tracking-[-0.03em]">
-                {currentSlide.lead}
-                <span className="text-[#ED0018]">{currentSlide.accent}</span>
-              </h1>
-              <p className="mt-3 text-[15px] leading-6 text-[#55515A]">{currentSlide.body}</p>
-              <div className="mt-4 flex items-center gap-2.5">
-                <span className="flex h-6 w-6 items-center justify-center rounded-full bg-[#ED0018] text-white">
-                  <Check size={14} strokeWidth={2.8} />
-                </span>
-                <span className="text-sm font-semibold text-[#171717]">{currentSlide.note}</span>
-              </div>
-            </motion.div>
-          </AnimatePresence>
-
-          <div className="mt-5 flex items-center gap-2">
-            {SLIDES.map((item, index) => (
-              <button
-                key={item.image}
-                type="button"
-                aria-label={`Go to slide ${index + 1}`}
-                onClick={() => goToStep(index)}
-                className={`h-1.5 rounded-full transition-all duration-300 ${
-                  step === index ? "w-8 bg-[#ED0018]" : "w-3 bg-[#E9E6E7]"
-                }`}
-              />
-            ))}
-          </div>
-
-          <div className="mt-5 flex gap-3">
-            {step > 0 && (
-              <button
-                type="button"
-                onClick={previousStep}
-                className="h-14 shrink-0 rounded-full border border-[#E9E6E7] px-6 text-base font-semibold"
-              >
-                Back
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => {
-                tick();
-                nextStep();
-              }}
-              className="flex h-14 min-w-0 flex-1 items-center justify-center gap-2 rounded-full bg-[#ED0018] text-base font-bold text-white shadow-[0_10px_24px_rgba(227,6,19,.28)]"
-            >
-              {isLast ? "Get started" : "Continue"}
-              <ArrowRight size={19} />
-            </button>
-          </div>
-        </section>
-      </main>
-    );
-  }
-
   /* ---------- Render ---------- */
 
   return (
@@ -391,7 +290,7 @@ export default function Onboarding({ onFinish }) {
       {/* Background photography */}
 
       <div className="onboarding-background absolute inset-0 z-0 bg-[#061744]">
-        {canWebGL2 && isDesktop ? (
+        {canWebGL2 ? (
           <AnimatePresence initial={false}>
             <motion.div
               key={currentSlide.image}
@@ -481,7 +380,7 @@ export default function Onboarding({ onFinish }) {
             <span className="hidden h-7 w-px bg-white/25 sm:block" />
 
             <span className="hidden text-[10px] font-semibold tracking-[0.2em] text-white/65 sm:block">
-              BUILDING MATERIALS, SIMPLIFIED
+              HOME SERVICES, SIMPLIFIED
             </span>
           </div>
 
@@ -644,7 +543,7 @@ export default function Onboarding({ onFinish }) {
 
         <footer className="mt-auto hidden shrink-0 items-center justify-between gap-3 border-t border-white/15 pt-4 text-xs font-medium tracking-[0.06em] text-white/65 sm:flex">
           <span>
-            WakaStores · Building materials made simple
+            SmartFixer · Home services made simple
           </span>
 
           <span className="flex items-center gap-2">
