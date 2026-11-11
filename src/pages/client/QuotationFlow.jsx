@@ -8,14 +8,14 @@ import { formatNaira } from '../../utils/formatters'
 const UNITS = ['bags', 'pieces', 'lengths', 'metres', 'rolls', 'boxes', 'sheets', 'tonnes', 'litres', 'buckets', 'bundles']
 const field = 'w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3 text-sm outline-none focus:border-[var(--red)]'
 const card = 'rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4'
-const newRow = () => ({ id: `line-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: '', quantity: 1, unit: 'bags', specs: '', notes: '' })
+const newRow = () => ({ id: `line-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, name: '', quantity: 1, unit: '', specs: '', notes: '' })
 
 /* Create: paste / manual / upload -> review -> submit */
 export function NewQuotationFlow() {
   const { createQuotationFull } = useAppState(), navigate = useNavigate(), [sp] = useSearchParams()
   const [name, setName] = useState(''), [text, setText] = useState(''), [rows, setRows] = useState(sp.get('mode') === 'paste' || sp.get('mode') === 'upload' ? [] : [newRow()]), [file, setFile] = useState(''), [err, setErr] = useState('')
   const patch = (id, k, v) => setRows(rows.map((r) => (r.id === id ? { ...r, [k]: v } : r)))
-  const extract = () => { setRows([...rows.filter((r) => r.name.trim()), ...parseMaterialsList(text).map((r, i) => ({ ...r, id: `${r.id}-${Date.now()}-${i}`, unit: r.unit || 'pieces' }))]); setText('') }
+  const extract = () => { setRows([...rows.filter((r) => r.name.trim()), ...parseMaterialsList(text).map((r, i) => ({ ...r, id: `${r.id}-${Date.now()}-${i}`, unit: r.unit || '' }))]); setText('') }
   const submit = () => {
     const list = rows.filter((r) => r.name.trim())
     if (!list.length) return setErr('Add at least one material.')
@@ -32,7 +32,7 @@ export function NewQuotationFlow() {
     <div className="mt-4 space-y-3">{rows.map((r) => <div key={r.id} className={`${card} grid gap-2 sm:grid-cols-[2fr_1fr_1fr_auto]`}>
       <input className={field} value={r.name} onChange={(e) => patch(r.id, 'name', e.target.value)} placeholder="Material name" aria-label="Material name" />
       <input className={field} type="number" min="1" value={r.quantity} onChange={(e) => patch(r.id, 'quantity', e.target.value)} aria-label="Quantity" />
-      <select className={field} value={r.unit} onChange={(e) => patch(r.id, 'unit', e.target.value)} aria-label="Unit">{[...new Set([r.unit, ...UNITS])].filter(Boolean).map((u) => <option key={u}>{u}</option>)}</select>
+      <select className={field} value={r.unit} onChange={(e) => patch(r.id, 'unit', e.target.value)} aria-label="Unit"><option value="">Any unit</option>{[...new Set([r.unit, ...UNITS])].filter(Boolean).map((u) => <option key={u}>{u}</option>)}</select>
       <button className="secondary" aria-label="Remove item" onClick={() => setRows(rows.filter((x) => x.id !== r.id))}><Trash2 size={16} /></button>
       <input className={`${field} sm:col-span-2`} value={r.specs} onChange={(e) => patch(r.id, 'specs', e.target.value)} placeholder="Specifications (optional)" /><input className={`${field} sm:col-span-2`} value={r.notes} onChange={(e) => patch(r.id, 'notes', e.target.value)} placeholder="Notes (optional)" /></div>)}</div>
     <button className="secondary mt-4" onClick={() => setRows([...rows, newRow()])}><Plus size={16} /> Add item</button>
@@ -65,7 +65,7 @@ export function QuotationDetail() {
     {converted && <div className={card}>Converted to an order. <Link className="font-semibold text-[var(--red)]" to={`/client/orders/${q.orderId}`}>Open order</Link></div>}
     <div className="grid gap-3 md:grid-cols-3">{m.results.map((r) => <div key={r.merchant.id} className={`${card} ${r.eligible ? '' : 'opacity-60'}`}><div className="flex items-start justify-between gap-2"><b>{r.merchant.name}</b><span className={`status ${r.eligible ? 'processing' : ''}`}>{r.eligible ? 'Eligible' : 'Below 60%'}</span></div>
       <div className="mt-2 text-3xl font-extrabold">{r.percentage}%</div><div className="text-xs text-[var(--muted)]">{r.matchedCount} of {r.totalLines} lines · {r.merchant.address}</div>
-      {r.eligible && <div className="mt-2 text-sm">Est. subtotal {formatNaira(r.subtotal)}</div>}{r.unmatched.length > 0 && <div className="mt-2 text-xs text-[var(--red)]">Missing: {r.unmatched.map((u) => u.line.name).join(', ')}</div>}</div>)}</div>
+      {r.eligible && <div className="mt-2 text-sm">Est. subtotal {formatNaira(r.subtotal)}</div>}{r.unmatched.length > 0 && <div className="mt-2 text-xs text-[var(--red)]">Missing: {r.unmatched.map((u) => (u.soldPerUnit ? `${u.line.name} (sold per ${u.soldPerUnit}, you asked for ${u.line.unit})` : u.line.name)).join(', ')}</div>}</div>)}</div>
     {m.quotationNeedsSourcing && <div className={`${card} border-[var(--red)]`}>No merchant reached 60%. This quotation was sent to Super Admin for manual sourcing.</div>}
     {!converted && !m.quotationNeedsSourcing && <>
       <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="text-lg font-bold">Choose a merchant per item</h2><div className="flex flex-wrap gap-2"><label className="text-xs font-semibold">Sort by <select className="ml-2 rounded-lg border border-[var(--line)] bg-[var(--surface)] p-2" value={sortBy} onChange={e=>setSortBy(e.target.value)}><option value="name">Name A–Z</option><option value="unit">Unit</option><option value="price">Lowest unit price</option></select></label><button className="secondary" onClick={() => setPick(null)}>Best basket</button></div></div>

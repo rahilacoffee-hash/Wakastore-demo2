@@ -80,7 +80,11 @@ export function matchQuotation(lines, merchants, products, threshold = DEFAULT_T
       const unmatched = []
       lines.forEach((line) => {
         const hit = mine.map((p) => ({ p, r: lineMatchesProduct(line, p) })).filter((x) => x.r.ok).sort((a, b) => a.p.price - b.p.price)[0]
-        if (!hit) return unmatched.push({ line })
+        if (!hit) {
+          // Same item, different unit? Tell the UI which unit the merchant actually sells it in.
+          const near = mine.find((p) => lineMatchesProduct({ ...line, unit: '' }, p).ok)
+          return unmatched.push(near ? { line, soldPerUnit: near.unit } : { line })
+        }
         const availableQty = Math.min(line.quantity, hit.p.stock)
         matched.push({
           line, product: hit.p, unitPrice: hit.p.price, availableQty,
