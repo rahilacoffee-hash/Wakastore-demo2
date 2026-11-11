@@ -1,6 +1,6 @@
 import { motion } from "framer-motion";
 import { Compass, Home, PackageCheck, UserRound, WalletCards } from "lucide-react";
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 
 let ITEMS = [
   { label: "Home", to: "/client/overview", icon: Home },
@@ -10,7 +10,14 @@ let ITEMS = [
   { label: "Account", to: "/client/account", icon: UserRound },
 ];
 
+// Pages that have their own fixed bottom action bar (e.g. quantity / Add to cart /
+// Buy now). The floating tab bar would sit on top of it, so it is hidden there.
+const HIDE_ON = ["/client/product/"];
+
 export default function BottomNav() {
+  const { pathname } = useLocation();
+  if (HIDE_ON.some((prefix) => pathname.startsWith(prefix))) return null;
+
   return (
     <nav
       aria-label="Mobile navigation"
