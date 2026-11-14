@@ -1,5 +1,7 @@
 // Extra demo inventory so quotation matching is testable (80% / 60% / 40%), plus merchant logins.
 // Merged into saved state by id, so existing localStorage data is kept.
+import { CATEGORY_MERCHANTS, CATEGORY_PRODUCTS } from './categoryProducts.js'
+
 const mergeById = (a = [], b = []) => [...a, ...b.filter((x) => !a.some((y) => y.id === x.id))]
 
 const EXTRA_MERCHANTS = [{ id: 'm-106', name: 'ColourCraft Store', status: 'approved', contact: '+234 801 000 0006', address: 'Wuse II, Abuja', description: 'Paints, tiles, doors and finishes.', categories: ['Paint Merchant', 'Tiles Merchant', 'Doors, Locks & Hardware Merchant'], approvedAt: '2026-10-06', rejectionReason: '' }]
@@ -31,14 +33,28 @@ const ROWS = [
 export function withSeedExtras(s) {
   const img = (cat) => s.products.find((p) => p.category === cat)?.image || s.products[0]?.image
   const extra = ROWS.map(([id, merchantId, merchant, name, category, unit, price, stock]) => ({ id, merchantId, merchant, name, category, unit, price, stock, available: true, image: img(category) }))
+  const merchants = mergeById(mergeById(s.merchants, EXTRA_MERCHANTS), CATEGORY_MERCHANTS).map((m) => (m.id === 'm-104' && m.status === 'rejected' && !m.rejectedAt ? { ...m, rejectedAt: '2026-11-06T09:00:00Z' } : m))
   return {
     ...s,
-    merchants: mergeById(s.merchants, EXTRA_MERCHANTS).map((m) => (m.id === 'm-104' && m.status === 'rejected' && !m.rejectedAt ? { ...m, rejectedAt: '2026-11-06T09:00:00Z' } : m)),
-    products: mergeById(s.products, extra),
-    merchantUsers: s.merchantUsers || MERCHANT_USERS,
+    // Demo merchants can source items they do not stock (they still have to confirm each one).
+    // Self-registered merchants (submittedAt set) start with this OFF until they switch it on.
+    merchants: merchants.map((m) => (m.submittedAt ? m : { ...m, acceptsSourcing: m.acceptsSourcing ?? true })),
+    products: mergeById(mergeById(s.products, extra), CATEGORY_PRODUCTS),
+    // Merge by id (NOT `s.merchantUsers || MERCHANT_USERS`): normalizeState fills a missing list with [],
+    // which is truthy, so the demo merchant logins were never created and demo sign-in hit "couldn't find this merchant account".
+    merchantUsers: mergeById(s.merchantUsers || [], MERCHANT_USERS.filter((u) => merchants.some((m) => m.id === u.merchantId))),
     pendingQuotationId: s.pendingQuotationId ?? null
   }
 }
+// Demo mode: a merchant who registered themselves (submittedAt set, never rejected) is approved
+// automatically AUTO_APPROVE_MS after applying. Seeded pending merchants are left for the admin demo.
+export const AUTO_APPROVE_MS = 20000
+export const autoApproveAt = (m) => {
+  if (!m || m.status !== 'pending' || m.rejectedAt || !m.submittedAt) return null
+  const t = Date.parse(m.submittedAt)
+  return Number.isFinite(t) ? t + AUTO_APPROVE_MS : null
+}
+
 // Which merchant is signed in (new sign-ups carry merchantId; demo logins are looked up by email).
 // Validate a saved merchantId first, since browser storage can outlive a reset
 // of the merchant list. In that case, fall back to the account's email mapping.

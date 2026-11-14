@@ -39,11 +39,48 @@ const definitions = [
   ['Pest Control & Fumigation Supplies Merchant', Wind, 'Pest control and fumigation supplies']
 ]
 
+// Relationship between the 30 merchant categories and the 12 customer-facing
+// categories. Every merchant category belongs to exactly one customer category.
+// (No merchant category currently maps to "AC & HVAC".)
+export const MERCHANT_TO_CUSTOMER_CATEGORY = {
+  'Cement Merchant': 'Building Materials',
+  'Sand Merchant': 'Building Materials',
+  'Chippings/Granite Merchant': 'Building Materials',
+  'Blocks Merchant': 'Building Materials',
+  'Iron Rods & Reinforcement Materials Merchant': 'Steel, Aluminium & Metal',
+  'Timber Merchant': 'Wood & Furniture Materials',
+  'Plywood & Board Merchant': 'Wood & Furniture Materials',
+  'Roofing Materials & Accessories Merchant': 'Roofing & Waterproofing',
+  'Electrical Materials Merchant': 'Electrical & Lighting',
+  'Lighting & Light Fittings Merchant': 'Electrical & Lighting',
+  'Plumbing Materials Merchant': 'Plumbing & Sanitary',
+  'Sanitary Ware Merchant': 'Plumbing & Sanitary',
+  'Tiles Merchant': 'Tiles & Flooring',
+  'Marble & Granite Merchant': 'Tiles & Flooring',
+  'Tile Adhesive & Grout Merchant': 'Building Materials',
+  'Paint Merchant': 'Paints & Wall Finishes',
+  'Screeding & Wall Finishes Materials Merchant': 'Paints & Wall Finishes',
+  'POP & Gypsum Materials Merchant': 'Ceiling, POP & Partition',
+  'Ceiling Materials Merchant': 'Ceiling, POP & Partition',
+  'Doors, Locks & Hardware Merchant': 'Doors, Windows & Hardware',
+  'Aluminium Materials Merchant': 'Steel, Aluminium & Metal',
+  'Glass Merchant': 'Doors, Windows & Hardware',
+  'Steel, Metal & Welding Materials Merchant': 'Steel, Aluminium & Metal',
+  'MDF & Furniture Board Merchant': 'Wood & Furniture Materials',
+  'Furniture Fittings & Accessories Merchant': 'Wood & Furniture Materials',
+  'Wallpaper & Wall Panel Merchant': 'Paints & Wall Finishes',
+  'Curtains & Blinds Merchant': 'Doors, Windows & Hardware',
+  'General Hardware Merchant': 'General Hardware & Consumables',
+  'Sealants, Silicone & Adhesives Merchant': 'General Hardware & Consumables',
+  'Pest Control & Fumigation Supplies Merchant': 'General Hardware & Consumables',
+}
+
 export const categories = definitions.map(([name, icon, description], index) => ({
   id: index + 1,
   name,
   icon,
-  description
+  description,
+  customerCategory: MERCHANT_TO_CUSTOMER_CATEGORY[name],
 }))
 
 export const MERCHANT_CATEGORY_NAMES = categories.map(({ name }) => name)

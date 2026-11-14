@@ -30,6 +30,9 @@ import {
   BarChart3,
 } from "lucide-react";
 import { useAppState } from "../context/AppStateContext";
+import MerchantOrderItems from './MerchantOrderItems'
+import * as Sourcing from '../services/sourcing'
+import { itemsForMerchant, upgradeOrder } from '../services/sourcing'
 import { merchantIdOf } from "../data/quoteSeed";
 import { categories } from "../constants/categories";
 import { formatNaira } from "../utils/formatters";
@@ -516,96 +519,42 @@ export function MerchantProducts() {
 }
 
 export function MerchantOrders() {
-  const { state, updateSubOrderStatus } = useAppState();
-  const orders = state.orders.filter((order) =>
-    order.subOrders?.some((sub) => sub.merchantId === merchantIdOf(state)),
-  );
+  const { state, updateSubOrderStatus, setMerchantSourcing } = useAppState();
+  const me = merchantIdOf(state);
+  const merchant = state.merchants.find((m) => m.id === me);
+  const orders = state.orders.filter((order) => {
+    const v = itemsForMerchant(upgradeOrder(order), me);
+    return v.current.length || v.former.length || order.subOrders?.some((sub) => sub.merchantId === me);
+  });
   return (
     <div className="space-y-5">
       <h1 className="text-3xl font-extrabold">Incoming orders</h1>
-      {orders.map((order) => (
-        <div
-          key={order.id}
-          className="rounded-[22px] border border-[var(--line)] bg-[var(--surface)] p-5"
-        >
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <div className="text-xs font-bold uppercase tracking-[0.15em] text-[var(--muted)]">
-                {order.id}
+      <label className="flex items-start gap-3 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 text-sm font-semibold">
+        <input type="checkbox" checked={Boolean(merchant?.acceptsSourcing)} onChange={(e) => setMerchantSourcing(e.target.checked)} className="mt-0.5 h-5 w-5 accent-[var(--red)]" />
+        <span>I can source products I do not stock. <span className="block font-normal text-[var(--muted)]">Lets WakaStore offer you individual unavailable items from other orders. You still have to confirm each one.</span></span>
+      </label>
+      {!orders.length && <p className="rounded-2xl border border-dashed border-[var(--line)] p-8 text-center text-sm text-[var(--muted)]">No orders yet.</p>}
+      {orders.map((order) => {
+        const sub = order.subOrders?.find((x) => x.merchantId === me);
+        return (
+          <div key={order.id} className="rounded-[22px] border border-[var(--line)] bg-[var(--surface)] p-5" data-order={order.id}>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-[0.15em] text-[var(--muted)]">{order.id}</div>
+                <h3 className="mt-1 text-xl font-extrabold">Customer order</h3>
               </div>
-              <h3 className="mt-1 text-xl font-extrabold">Customer order</h3>
+              <span className="rounded-full bg-[var(--blush)] px-2.5 py-1 text-[10px] font-bold uppercase text-[var(--red)]">{order.status}</span>
             </div>
-            <span className="rounded-full bg-[var(--blush)] px-2.5 py-1 text-[10px] font-bold uppercase text-[var(--red)]">
-              {order.status}
-            </span>
+            <div className="mt-4">
+              <MerchantOrderItems order={upgradeOrder(order)} merchantId={me} />
+            </div>
+            {sub && sub.status === "Pending" && (
+              <button type="button" onClick={() => updateSubOrderStatus(order.id, me, "Accepted")} className="primary mt-3 min-h-12">Accept my part of this order</button>
+            )}
+            {sub && sub.status !== "Pending" && <p className="mt-3 text-xs text-[var(--muted)]">Your part of this order: {sub.status}</p>}
           </div>
-          <div className="mt-4 space-y-3">
-            {order.subOrders
-              .filter((sub) => sub.merchantId === merchantIdOf(state))
-              .map((sub) => (
-                <div
-                  key={sub.merchantId}
-                  className="rounded-2xl bg-[var(--soft)] p-3"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold">{sub.merchantName}</span>
-                    <span className="text-xs text-[var(--muted)]">
-                      {sub.status}
-                    </span>
-                  </div>
-                  <ul className="mt-3 space-y-2 text-sm text-[var(--muted)]">
-                    {sub.items.map((item) => (
-                      <li key={item.name}>
-                        {item.quantity} × {item.name}
-                      </li>
-                    ))}
-                  </ul>
-                  <div className="mt-3 flex flex-wrap gap-2">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateSubOrderStatus(
-                          order.id,
-                          merchantIdOf(state),
-                          "Accepted",
-                        )
-                      }
-                      className="rounded-lg bg-[var(--red)] px-3 py-1.5 text-xs font-bold text-white"
-                    >
-                      Accept
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateSubOrderStatus(
-                          order.id,
-                          merchantIdOf(state),
-                          "Rejected",
-                        )
-                      }
-                      className="rounded-lg bg-[var(--soft)] px-3 py-1.5 text-xs font-bold"
-                    >
-                      Reject
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateSubOrderStatus(
-                          order.id,
-                          merchantIdOf(state),
-                          "Packed",
-                        )
-                      }
-                      className="rounded-lg bg-[var(--soft)] px-3 py-1.5 text-xs font-bold"
-                    >
-                      Update status
-                    </button>
-                  </div>
-                </div>
-              ))}
-          </div>
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -1124,38 +1073,49 @@ export function AdminAuditLogs() {
 }
 
 export function SuperAdminSourcing() {
-  const { state } = useAppState();
+  const { state, adminAssignItem } = useAppState();
+  const [choice, setChoice] = useState({});
+  const [message, setMessage] = useState({});
+  const nameOf = (id) => state.merchants.find((m) => m.id === id)?.name || "a merchant";
   return (
     <div className="space-y-5">
       <h1 className="text-3xl font-extrabold">Manual sourcing</h1>
+      <p className="text-sm text-[var(--muted)]">Items no merchant could supply or source. Assign one by hand. The merchant must still confirm; nothing is treated as sourced until they do.</p>
+      {!state.sourcing.length && <p className="rounded-2xl border border-dashed border-[var(--line)] p-8 text-center text-sm text-[var(--muted)]">Nothing waiting for manual sourcing.</p>}
       <div className="space-y-3">
-        {state.sourcing.map((item) => (
-          <div
-            key={item.id}
-            className="rounded-[22px] border border-[var(--line)] bg-[var(--surface)] p-4"
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="font-extrabold">{item.item}</div>
-                <div className="text-sm text-[var(--muted)]">
-                  Order {item.orderId}
+        {state.sourcing.map((entry) => {
+          const order = state.orders.find((o) => o.id === entry.orderId);
+          const it = order?.items?.find((i) => i.itemId === entry.itemId);
+          const open = it && [Sourcing.SOURCING.UNRESOLVED, Sourcing.SOURCING.AWAITING_MERCHANT].includes(it.sourcingStatus);
+          const options = state.merchants.filter((m) => m.status === "approved" && !(it?.declinedBy || []).includes(m.id));
+          return (
+            <div key={entry.id} className="rounded-[22px] border border-[var(--line)] bg-[var(--surface)] p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="font-extrabold">{entry.item}</div>
+                  <div className="text-sm text-[var(--muted)]">Order {entry.orderId}{it ? ` · ${it.quantity} ${it.unit || ""}` : ""}</div>
                 </div>
+                <span className="rounded-full bg-[var(--soft)] px-2.5 py-1 text-[10px] font-bold uppercase text-[var(--muted)]">
+                  {!it ? entry.status : open ? "Awaiting manual sourcing" : `Assigned to ${nameOf(it.currentMerchantId)}`}
+                </span>
               </div>
-              <span className="rounded-full bg-[var(--soft)] px-2.5 py-1 text-[10px] font-bold uppercase text-[var(--muted)]">
-                {item.status}
-              </span>
+              <div className="mt-3 text-sm text-[var(--muted)]">{entry.reason}</div>
+              {it && it.declinedBy.length > 0 && <div className="mt-1 text-xs text-[var(--muted)]">Already declined: {it.declinedBy.map(nameOf).join(", ")}</div>}
+              {open && (
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <select className="h-11 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 text-sm" aria-label={`Merchant for ${entry.item}`} value={choice[entry.id] || ""} onChange={(e) => setChoice({ ...choice, [entry.id]: e.target.value })}>
+                    <option value="">Choose a merchant…</option>
+                    {options.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
+                  </select>
+                  <button type="button" disabled={!choice[entry.id]} className="primary min-h-11 disabled:opacity-50" onClick={() => { const r = adminAssignItem(entry.orderId, entry.itemId, choice[entry.id]); setMessage({ ...message, [entry.id]: r.ok ? "" : r.error }); }}>
+                    Assign sourcing
+                  </button>
+                </div>
+              )}
+              {message[entry.id] && <p role="alert" className="mt-2 text-sm font-semibold text-[var(--red)]">{message[entry.id]}</p>}
             </div>
-            <div className="mt-3 text-sm text-[var(--muted)]">
-              {item.reason}
-            </div>
-            <button
-              type="button"
-              className="mt-3 rounded-lg bg-[var(--red)] px-3 py-1.5 text-xs font-bold text-white"
-            >
-              Assign sourcing
-            </button>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

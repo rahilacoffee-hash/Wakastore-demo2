@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { withSeedExtras } from "../data/quoteSeed";
+import { withSeedExtras, merchantIdOf } from "../data/quoteSeed";
+import * as Sourcing from "../services/sourcing";
 import { matchQuotation } from "../services/matching";
 import { migrateCategories } from "../utils/migrateCategories";
 
@@ -460,6 +461,8 @@ const normalizeState = (candidate) => {
     ...wallet,
     history: Array.isArray(wallet.history) ? wallet.history : [...defaultState.wallet.history],
   };
+  // Orders saved before item-level tracking get per-item assignment fields (idempotent).
+  merged.orders = merged.orders.map(Sourcing.upgradeOrder);
   merged.session = merged.session && typeof merged.session === "object" ? merged.session : null;
   merged.toast = merged.toast && typeof merged.toast === "object" ? merged.toast : null;
   return merged;
@@ -551,39 +554,39 @@ export function AppStateProvider({ children }) {
     let created = false;
     updateState((prev) => {
       if (!prev.cart.length) return prev;
-      const items = prev.cart.map((item) => ({
-        ...item,
-        productRef: item.id,
-        quantity: Math.max(1, Number(item.quantity) || 1),
-        unitPrice: Number(item.price) || 0,
-        lineTotal: (Number(item.price) || 0) * Math.max(1, Number(item.quantity) || 1),
-      }));
-      const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+      const items = prev.cart.map((item) => {
+        const sourcingLine = item.kind === "sourcing";
+        const qty = Math.max(1, Number(item.quantity) || 1);
+        return {
+          ...item,
+          productRef: sourcingLine ? null : item.id,
+          quantity: qty,
+          unitPrice: sourcingLine ? null : Number(item.price) || 0,
+          lineTotal: sourcingLine ? null : (Number(item.price) || 0) * qty,
+        };
+      });
+      // Only priced lines are charged now. Lines that need sourcing stay in the order, unpriced,
+      // until the merchant confirms a price and the customer approves it.
+      const subtotal = items.reduce((sum, item) => sum + (item.lineTotal || 0), 0);
       const fee = Math.round(subtotal * feeRate);
       const shipping = Math.max(0, Number(deliveryFee) || 0);
       const total = subtotal + fee + shipping;
       if (method === "wallet" && Number(prev.wallet?.balance || 0) < total) return prev;
-      const merchantIds = [...new Set(items.map((item) => item.merchantId))];
-      const subOrders = merchantIds.map((merchantId) => {
-        const merchantName = prev.merchants.find((merchant) => merchant.id === merchantId)?.name || "Marketplace";
-        return {
-          merchantId,
-          merchantName,
-          status: "Pending",
-          items: items.filter((item) => item.merchantId === merchantId).map((item) => ({
-            name: item.name, productRef: item.productRef, quantity: item.quantity,
-            unit: item.unit, price: item.unitPrice, lineTotal: item.lineTotal,
-          })),
-        };
-      });
-      const order = {
+      const built = Sourcing.buildItems(ref, items.map((item) => ({
+        lineId: item.lineId, name: item.name, specification: item.specs || "", quantity: item.quantity, unit: item.unit,
+        productRef: item.productRef, unitPrice: item.unitPrice, category: item.category, merchantId: item.merchantId,
+        unavailable: item.kind === "sourcing",
+      })));
+      const orderItems = items.map((item, i) => ({ ...item, ...built[i], price: item.unitPrice }));
+      const order = Sourcing.rebuildSubOrders({
         id: ref,
         receiptId: `WKR-${ref.replace('WK-', '')}`,
         date: new Date().toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short" }),
         subtotal, wakastoreFee: fee, deliveryFee: shipping, total,
-        merchants: merchantIds.length, status: "Paid", paymentMethod: method,
-        deliveryAddress: { ...deliveryAddress }, items, subOrders,
-      };
+        status: "Paid", paymentMethod: method, customerEmail: prev.session?.email || "",
+        deliveryAddress: { ...deliveryAddress }, items: orderItems, subOrders: [], ledger: [], payments: [],
+      }, prev.merchants);
+      const unavailableCount = built.filter((b) => b.availability === "NOT_IN_STOCK").length;
       created = true;
       return {
         ...prev,
@@ -607,7 +610,15 @@ export function AppStateProvider({ children }) {
             type: "debit", date: new Date().toLocaleDateString("en-NG"),
           }, ...prev.wallet.history] : prev.wallet.history,
         },
-        notifications: [{ id: `n-${Date.now()}`, title: "Order placed", detail: `Order ${ref} has been created.`, seen: false }, ...prev.notifications],
+        notifications: [
+          { id: `n-${Date.now()}`, title: "Order placed", detail: `Order ${ref} has been created.${unavailableCount ? ` ${unavailableCount} item(s) are not in stock. The merchant will confirm whether they can source them and send you the price to approve.` : ""}`, seen: false },
+          ...built.filter((b) => b.availability === "NOT_IN_STOCK" && b.currentMerchantId).map((b, i) => ({ id: `n-${Date.now()}-s${i}`, title: "Sourcing requested", detail: `${ref}: please confirm whether you can source ${b.quantity} ${b.unit || ""} ${b.name}.`.replace(/\s+/g, " "), seen: false, recipientMerchantId: b.currentMerchantId })),
+          ...prev.notifications,
+        ],
+        sourcing: [
+          ...built.filter((b) => b.sourcingStatus === Sourcing.SOURCING.AWAITING_MERCHANT).map((b) => ({ id: `SRC-${Date.now()}-${b.itemId}`, orderId: ref, itemId: b.itemId, item: b.name, reason: "No eligible merchant was assigned when the order was placed.", status: "Awaiting manual sourcing" })),
+          ...(prev.sourcing || []),
+        ],
       };
     });
     return created ? ref : null;
@@ -691,6 +702,24 @@ export function AppStateProvider({ children }) {
         ),
         notifications: [{ id: `n-${Date.now()}`, title: "Application approved", detail: `${merchant.name} is now approved and can manage products.`, recipientMerchantId: merchantId, seen: false }, ...prev.notifications],
         auditLogs: [{ id: `AUD-${Date.now()}`, actor: prev.session?.name || "Admin", action: "Approved merchant", date: new Date().toLocaleString("en-GB"), entity: merchant.name, details: "Merchant approved by admin." }, ...prev.auditLogs],
+      };
+    });
+
+  // Demo only: called by MerchantGate when a self-registered merchant's countdown ends.
+  const autoApproveMerchant = (merchantId) =>
+    updateState((prev) => {
+      const merchant = prev.merchants.find((item) => item.id === merchantId);
+      if (!merchant || merchant.status !== "pending") return prev;
+      const reviewedAt = new Date().toISOString();
+      return {
+        ...prev,
+        merchants: prev.merchants.map((item) =>
+          item.id === merchantId
+            ? { ...item, status: "approved", approvedAt: reviewedAt, approvedBy: "Demo auto-approval", rejectionReason: "", suspensionReason: "" }
+            : item,
+        ),
+        notifications: [{ id: `n-${Date.now()}`, title: "Application approved", detail: `${merchant.name} was approved automatically (demo mode).`, recipientMerchantId: merchantId, seen: false }, ...prev.notifications],
+        auditLogs: [{ id: `AUD-${Date.now()}`, actor: "Demo auto-approval", action: "Approved merchant", date: new Date().toLocaleString("en-GB"), entity: merchant.name, details: "Auto-approved 20 seconds after applying (demo mode)." }, ...prev.auditLogs],
       };
     });
 
@@ -804,38 +833,34 @@ export function AppStateProvider({ children }) {
         })),
       };
 
-      // Smart merchant rerouting: return the rejected stock, then reserve the
-      // same items from the lowest-priced approved merchant with sufficient stock.
-      const products = prev.products.map((p) => ({ ...p }));
-      target.items.forEach((line) => {
-        const original = products.find((p) => p.id === line.productRef || (p.merchantId === merchantId && p.name.toLowerCase() === line.name.toLowerCase()));
-        if (original) original.stock = Number(original.stock || 0) + Number(line.quantity || 0);
+      // Rejecting a whole sub-order is handled ITEM BY ITEM: each of this merchant's open items is
+      // declined and offered to another eligible merchant individually (no whole-order rerouting).
+      const actor = { role: "merchant", merchantId };
+      let working = order;
+      let moved = 0;
+      let stuck = 0;
+      order.items.filter((i) => i.currentMerchantId === merchantId && i.fulfilment === "PENDING").forEach((i) => {
+        const r = Sourcing.declineSourcing(working, i.itemId, actor, { confirmed: true, allowAvailable: true, reason: "Merchant rejected the order" }, { merchants: prev.merchants, products: prev.products });
+        if (!r.ok) return;
+        working = r.order;
+        if (r.rerouted) moved += 1; else stuck += 1;
       });
-      const approved = prev.merchants.filter((m) => m.status === "approved" && m.id !== merchantId);
-      const rerouted = new Map();
-      const unfilled = [];
-      target.items.forEach((line) => {
-        const candidates = products.filter((p) => p.available !== false && approved.some((m) => m.id === p.merchantId) && p.name.toLowerCase() === line.name.toLowerCase() && Number(p.stock || 0) >= Number(line.quantity || 0)).sort((a,b) => Number(a.price)-Number(b.price));
-        const pick = candidates[0];
-        if (!pick) { unfilled.push(line); return; }
-        pick.stock -= Number(line.quantity || 0);
-        const bucket = rerouted.get(pick.merchantId) || [];
-        bucket.push({ ...line, productRef: pick.id, price: Number(pick.price), lineTotal: Number(pick.price) * Number(line.quantity || 0), merchant: pick.merchant || approved.find((m) => m.id === pick.merchantId)?.name });
-        rerouted.set(pick.merchantId, bucket);
-      });
-      const nextSubs = (order.subOrders || []).map((sub) => sub === target ? { ...sub, status: "Rejected", rejectionReason: "Merchant unable to fulfil; SmartFixer rerouting initiated." } : sub);
-      rerouted.forEach((items, mid) => {
-        const merchant = prev.merchants.find((m) => m.id === mid);
-        nextSubs.push({ merchantId: mid, merchantName: merchant?.name || "Marketplace merchant", status: "Pending", items, subtotal: items.reduce((n, i) => n + Number(i.lineTotal || 0), 0), reassignedFrom: merchantId, timeline: [{ status: "Reassigned", date: new Date().toISOString() }] });
-      });
-      const nextSourcing = unfilled.length ? [{ id: `SRC-${Date.now()}`, orderId, item: unfilled.map((x) => x.name).join(", "), reason: "No approved merchant has sufficient stock after rejection.", status: "Awaiting manual sourcing" }, ...(prev.sourcing || [])] : (prev.sourcing || []);
+      const unresolved = working.items.filter((i) => i.sourcingStatus === Sourcing.SOURCING.UNRESOLVED && i.history.some((h) => h.type === "NO_ELIGIBLE_MERCHANT"));
+      const finalOrder = { ...working, subOrders: working.subOrders.map((sub) => (sub.merchantId === merchantId ? { ...sub, status: "Rejected" } : sub)) };
       const notifications = [
-        { id: `n-${Date.now()}`, title: rerouted.size ? "SmartFixer reassigned items" : "SmartFixer needs sourcing", detail: `${orderId}: ${rerouted.size} alternative merchant(s) assigned; ${unfilled.length} item(s) need manual sourcing.`, seen: false },
+        { id: `n-${Date.now()}`, title: moved ? "Items reassigned" : "Items need sourcing", detail: `${orderId}: ${moved} item(s) moved to other merchants individually; ${stuck} item(s) have no eligible merchant yet.`, seen: false },
         ...(prev.notifications || []),
       ];
+      const sourcing = [
+        ...unresolved.map((i) => ({ id: `SRC-${Date.now()}-${i.itemId}`, orderId, itemId: i.itemId, item: i.name, reason: "No other eligible merchant after rejection.", status: "Awaiting manual sourcing" })),
+        ...(prev.sourcing || []),
+      ];
+      const rebuilt = Sourcing.rebuildSubOrders(finalOrder, prev.merchants);
+      const kept = rebuilt.subOrders;
+      const t = Sourcing.orderTotals(rebuilt, feeRate);
       return {
-        ...prev, products, notifications, sourcing: nextSourcing,
-        orders: prev.orders.map((o) => o.id !== orderId ? o : ({ ...o, subOrders: nextSubs, status: unfilled.length ? "Partially sourcing" : "Processing" })),
+        ...prev, notifications, sourcing,
+        orders: prev.orders.map((o) => o.id !== orderId ? o : ({ ...rebuilt, subOrders: kept, subtotal: t.confirmedSubtotal, wakastoreFee: t.fee, total: t.total, status: unresolved.length ? "Partially sourcing" : "Processing" })),
       };
     });
 
@@ -1003,7 +1028,7 @@ export function AppStateProvider({ children }) {
       ),
     }));
 
-  const createQuotationFull = ({ name, items }) => {
+  const createQuotationFull = ({ name, items, deliveryLocation = "", neededBy = "", source = "manual" }) => {
     const id = `QT-${1000 + state.quotations.length + 1}`;
     const lines = items.map((l, i) => ({
       ...l,
@@ -1016,6 +1041,9 @@ export function AppStateProvider({ children }) {
       name: name?.trim() || "Materials list",
       date: todayLabel(),
       status: m.quotationNeedsSourcing ? "Needs sourcing" : "Matched",
+      deliveryLocation: String(deliveryLocation).trim(),
+      neededBy,
+      source,
       items: lines,
       matchedMerchants: m.eligible.map((r) => r.merchant.name),
     };
@@ -1046,15 +1074,138 @@ export function AppStateProvider({ children }) {
     }));
     return id;
   };
-  const quoteToCart = (quotationId, picks) =>
+  // sourcingLines: requested materials nobody has in stock. They stay in the cart/order,
+  // unpriced, assigned to the ranked eligible merchant (or to nobody if none qualifies).
+  const quoteToCart = (quotationId, picks, sourcingLines = []) =>
     updateState((prev) => ({
       ...prev,
       pendingQuotationId: quotationId,
-      cart: picks.map(({ productId, quantity }) => ({
-        ...prev.products.find((p) => p.id === productId),
-        quantity,
-      })),
+      cart: [
+        ...picks.map(({ productId, quantity, lineId }) => ({
+          ...prev.products.find((p) => p.id === productId),
+          quantity,
+          lineId: lineId || null,
+        })),
+        ...sourcingLines.map((l) => ({
+          id: `src-${l.lineId}`, kind: "sourcing", lineId: l.lineId, name: l.name, specs: l.specs || "",
+          quantity: Math.max(1, Number(l.quantity) || 1), unit: l.unit || "", price: 0, image: "",
+          merchantId: l.assigneeId || null,
+          merchant: prev.merchants.find((m) => m.id === l.assigneeId)?.name || "Awaiting merchant",
+        })),
+      ],
     }));
+
+  /* ---------- item-level sourcing, rerouting, fulfilment (all rules live in services/sourcing.js) ---------- */
+  const actorOf = (s) => ({ role: s.session?.role, merchantId: merchantIdOf(s), email: s.session?.email, name: s.session?.name });
+  const finalizeOrder = (prev, order) => {
+    const rebuilt = Sourcing.rebuildSubOrders(order, prev.merchants);
+    const t = Sourcing.orderTotals(rebuilt, feeRate);
+    return { ...rebuilt, subtotal: t.confirmedSubtotal, wakastoreFee: t.fee, total: t.total };
+  };
+  const note = (title, detail, recipientMerchantId) => ({ id: `n-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`, title, detail, seen: false, ...(recipientMerchantId ? { recipientMerchantId } : {}) });
+  const audit = (actor, action, entity, details) => ({ id: `AUD-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`, actor: actor || "System", action, date: new Date().toLocaleString("en-GB"), entity, details });
+
+  // Runs a pure service action. The result is computed against the current state so the UI gets an
+  // immediate { ok, error }; the same action is re-applied to the latest state inside updateState.
+  const runItemAction = (orderId, itemId, fn, effects) => {
+    const order = state.orders.find((o) => o.id === orderId);
+    if (!order) return { ok: false, error: "Order not found." };
+    const preview = fn(order, actorOf(state), state);
+    if (!preview.ok) return preview;
+    updateState((prev) => {
+      const current = prev.orders.find((o) => o.id === orderId);
+      if (!current) return prev;
+      const r = fn(current, actorOf(prev), prev);
+      if (!r.ok) return prev;
+      const fx = effects ? effects(prev, r, current) : {};
+      return {
+        ...prev,
+        orders: prev.orders.map((o) => (o.id === orderId ? finalizeOrder(prev, r.order) : o)),
+        notifications: [...(fx.notifications || []), ...prev.notifications],
+        auditLogs: [...(fx.auditLogs || []), ...prev.auditLogs],
+        sourcing: fx.sourcing ? [...fx.sourcing, ...(prev.sourcing || [])] : prev.sourcing,
+        wallet: fx.wallet || prev.wallet,
+        toast: fx.toast || prev.toast,
+      };
+    });
+    return preview;
+  };
+  const itemOf = (order, itemId) => order.items.find((i) => i.itemId === itemId);
+  const merchantName = (s, id) => s.merchants.find((m) => m.id === id)?.name || "a merchant";
+
+  const confirmItemSourcing = (orderId, itemId, details) =>
+    runItemAction(orderId, itemId, (o, a) => Sourcing.confirmSourcing(o, itemId, a, details), (prev, r) => {
+      const it = itemOf(r.order, itemId);
+      return { notifications: [note("Price needs your approval", `${orderId}: ${merchantName(prev, it.currentMerchantId)} can source ${it.name} at ${it.unitPrice} per ${it.unit || "unit"} (${it.sourcing.eta}). Review it on your order. It is not charged until you approve.`)] };
+    });
+
+  const declineItemSourcing = (orderId, itemId, details) =>
+    runItemAction(orderId, itemId, (o, a, s) => Sourcing.declineSourcing(o, itemId, a, details, { merchants: s.merchants, products: s.products }), (prev, r, current) => {
+      const it = itemOf(r.order, itemId);
+      const from = itemOf(current, itemId).currentMerchantId;
+      const base = { auditLogs: [audit(merchantName(prev, from), "Declined to source item", orderId, `${it.name}: ${r.rerouted ? `rerouted to ${merchantName(prev, it.currentMerchantId)}` : "no eligible merchant"}`)] };
+      if (r.rerouted) {
+        return { ...base, notifications: [
+          note("Item reassigned", `${orderId}: ${it.name} is now being handled by ${merchantName(prev, it.currentMerchantId)}. Your other items are unchanged.`),
+          note("New item assigned", `${orderId}: please confirm whether you can supply or source ${it.quantity} ${it.unit || ""} ${it.name}.`.replace(/\s+/g, " "), it.currentMerchantId),
+        ] };
+      }
+      return { ...base,
+        notifications: [note("Item needs sourcing help", `${orderId}: no merchant has confirmed ${it.name} yet. It stays in your order as unresolved. We will source it manually.`)],
+        sourcing: [{ id: `SRC-${Date.now()}-${itemId}`, orderId, itemId, item: it.name, reason: "Every eligible merchant declined or none has stock or sourcing capability.", status: "Awaiting manual sourcing" }] };
+    });
+
+  const decideItemPrice = (orderId, itemId, decision) =>
+    runItemAction(orderId, itemId, (o, a, s) => {
+      const r = Sourcing.decidePrice(o, itemId, a, decision);
+      if (!r.ok || decision !== "approve") return r;
+      const it = itemOf(o, itemId);
+      const charge = it.unitPrice * it.quantity + Math.round(it.unitPrice * it.quantity * feeRate);
+      if (o.paymentMethod === "wallet" && Number(s.wallet?.balance || 0) < charge) return { ok: false, code: "INSUFFICIENT_FUNDS", error: `Your demo wallet needs ₦${charge.toLocaleString("en-NG")} to approve this price. Top up and try again.` };
+      return { ...r, charge };
+    }, (prev, r) => {
+      if (!r.charge) return { notifications: [note("Price declined", `${orderId}: you declined the price. The item stays in your order as unresolved and is not charged.`)] };
+      const wallet = prev.orders.find((o) => o.id === orderId)?.paymentMethod === "wallet"
+        ? { ...prev.wallet, balance: prev.wallet.balance - r.charge, history: [{ id: `tx-${Date.now()}`, label: `Approved sourced item on ${orderId}`, amount: r.charge, type: "debit", date: new Date().toLocaleDateString("en-NG") }, ...prev.wallet.history] }
+        : prev.wallet;
+      return { wallet, notifications: [note("Price approved", `${orderId}: ₦${r.charge.toLocaleString("en-NG")} (simulated) charged for the sourced item.`)] };
+    });
+
+  const advanceItemFulfilment = (orderId, itemId, next) =>
+    runItemAction(orderId, itemId, (o, a) => Sourcing.advanceFulfilment(o, itemId, a, next), (prev, r) => {
+      const it = itemOf(r.order, itemId);
+      return { notifications: [note("Item update", `${orderId}: ${it.name} is now ${next.toLowerCase()}.`)] };
+    });
+
+  const acceptOrderItem = (orderId, itemId) =>
+    runItemAction(orderId, itemId, (o, a) => Sourcing.acceptItem(o, itemId, a), (prev, r) => ({
+      notifications: [note("Payment settled (simulation)", `${orderId}: ₦${r.settlement.merchantShare.toLocaleString("en-NG")} to the merchant, ₦${r.settlement.commission.toLocaleString("en-NG")} WakaStore commission (95/5, simulated).`, r.settlement.merchantId)],
+    }));
+
+  const reportItemProblem = (orderId, itemId, reason) =>
+    runItemAction(orderId, itemId, (o, a) => Sourcing.openDispute(o, itemId, a, reason), (prev, r) => {
+      const it = itemOf(r.order, itemId);
+      return { notifications: [note("Problem reported", `${orderId}: ${it.name}: payment is on hold until this is resolved.`, it.currentMerchantId)], auditLogs: [audit(prev.session?.name, "Dispute opened", orderId, `${it.name}: ${reason}`)] };
+    });
+
+  const resolveItemDispute = (orderId, itemId, outcome) =>
+    runItemAction(orderId, itemId, (o, a) => Sourcing.resolveDispute(o, itemId, a, outcome), (prev) => ({ auditLogs: [audit(prev.session?.name || "Admin", `Dispute ${outcome === "refund" ? "refunded" : "released"}`, orderId, itemId)] }));
+
+  const adminAssignItem = (orderId, itemId, merchantId) =>
+    runItemAction(orderId, itemId, (o, a, s) => Sourcing.adminAssign(o, itemId, merchantId, a, { merchants: s.merchants }), (prev, r) => {
+      const it = itemOf(r.order, itemId);
+      return {
+        notifications: [note("Item assigned to you", `${orderId}: please confirm whether you can supply or source ${it.quantity} ${it.unit || ""} ${it.name}.`.replace(/\s+/g, " "), merchantId), note("Item being sourced", `${orderId}: ${it.name} has been assigned to ${merchantName(prev, merchantId)}.`)],
+        auditLogs: [audit(prev.session?.name || "Admin", "Assigned unresolved item", orderId, `${it.name} -> ${merchantName(prev, merchantId)}`)],
+      };
+    });
+
+  const setMerchantSourcing = (enabled) => {
+    const id = merchantIdOf(state);
+    if (!id || state.session?.role !== "merchant") return { ok: false, error: "Only a merchant can change this." };
+    updateState((prev) => ({ ...prev, merchants: prev.merchants.map((m) => (m.id === id ? { ...m, acceptsSourcing: Boolean(enabled) } : m)) }));
+    return { ok: true };
+  };
 
   const value = useMemo(
     () => ({
@@ -1075,6 +1226,7 @@ export function AppStateProvider({ children }) {
       notify,
       ensureToastCleared,
       approveMerchant,
+      autoApproveMerchant,
       rejectMerchant,
       suspendMerchant,
       reactivateMerchant,
@@ -1091,6 +1243,15 @@ export function AppStateProvider({ children }) {
       resubmitMerchant,
       createQuotationFull,
       quoteToCart,
+      confirmItemSourcing,
+      declineItemSourcing,
+      decideItemPrice,
+      advanceItemFulfilment,
+      acceptOrderItem,
+      reportItemProblem,
+      resolveItemDispute,
+      adminAssignItem,
+      setMerchantSourcing,
     }),
     [state],
   );

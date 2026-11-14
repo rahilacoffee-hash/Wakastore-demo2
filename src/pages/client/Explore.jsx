@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { ArrowRight, Search, SlidersHorizontal, X } from "lucide-react";
 import { useAppState } from "../../context/AppStateContext";
-import { MARKET_CATEGORIES } from "../../constants/marketCategories";
+import { MARKET_CATEGORIES, marketCategoryOf } from "../../constants/marketCategories";
 import ProductTile from "../../components/ui/ProductTile";
+import { searchCatalogue } from "../../services/productSearch";
 
 let SORTS = [
   ["recommended", "Recommended"],
@@ -62,26 +63,32 @@ export default function Explore() {
     setParams(next, { replace: true });
   }
 
-  let results = useMemo(() => {
-    let list = (state.products || []).filter((p) => {
+  // Filters first, then (if there is a search term) the shared search engine ranks the pool:
+  // exact matches, then suggestions/partial matches. Different sizes are never substituted.
+  let { results, searchInfo } = useMemo(() => {
+    let pool = (state.products || []).filter((p) => {
       let m = (state.merchants || []).find((x) => x.id === p.merchantId);
       if (m && m.status !== "approved") return false;
       if (p.archived || p.available === false) return false;
       if (availability === "in" && !(Number(p.stock ?? 1) > 0)) return false;
-      if (category && p.category !== category) return false;
+      if (category && marketCategoryOf(p) !== category) return false;
       if (merchantId && p.merchantId !== merchantId) return false;
       if (min !== "" && Number(p.price) < Number(min)) return false;
       if (max !== "" && Number(p.price) > Number(max)) return false;
-      if (term) {
-        let hay = `${p.name} ${p.description || ""} ${p.brand || ""} ${p.category} ${merchantName(p)}`.toLowerCase();
-        if (!hay.includes(term)) return false;
-      }
       return true;
     });
-    if (sort === "price-low") list.sort((a, b) => a.price - b.price);
-    if (sort === "price-high") list.sort((a, b) => b.price - a.price);
-    if (sort === "name") list.sort((a, b) => String(a.name).localeCompare(String(b.name)));
-    return list;
+    let list = pool;
+    let info = null;
+    if (term) {
+      let withKeywords = pool.map((p) => ({ ...p, keywords: [merchantName(p), p.description || ""] }));
+      info = searchCatalogue(term, withKeywords);
+      let byId = new Map(pool.map((p) => [p.id, p]));
+      list = info.results.map((r) => ({ ...byId.get(r.product.id), __kind: r.kind }));
+    }
+    if (sort === "price-low") list = [...list].sort((a, b) => a.price - b.price);
+    if (sort === "price-high") list = [...list].sort((a, b) => b.price - a.price);
+    if (sort === "name") list = [...list].sort((a, b) => String(a.name).localeCompare(String(b.name)));
+    return { results: list, searchInfo: info };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [state.products, state.merchants, category, merchantId, min, max, availability, sort, term]);
 
@@ -165,19 +172,35 @@ export default function Explore() {
         </label>
       </div>
 
+      {searchInfo && !loading && results.length > 0 && !searchInfo.hasCatalogueMatch && (
+        <p role="status" className="mt-3 rounded-xl bg-[var(--blush)] p-3 text-sm">No exact match. These are the closest catalogue products; please check the size before ordering.{searchInfo.otherSpecs.length > 0 && ` Other sizes (not shown as matches): ${searchInfo.otherSpecs.map((p) => p.name).join(", ")}.`}</p>
+      )}
+      {searchInfo && !loading && results.length > 0 && searchInfo.hasCatalogueMatch && searchInfo.otherSpecs.length > 0 && (
+        <p className="mt-3 text-xs text-[var(--muted)]">Other sizes exist but are not shown as matches: {searchInfo.otherSpecs.map((p) => p.name).join(", ")}.</p>
+      )}
       <div className="mt-4">
         {loading ? (
           <Skeleton />
         ) : results.length ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
-            {results.map((p) => <ProductTile key={p.id || p.name} product={p} />)}
+            {results.map((p) => <ProductTile key={p.id || p.name} product={p} note={p.__kind && p.__kind !== "exact" ? (p.__kind === "suggestion" ? "Suggested match" : "Partial match") : ""} />)}
           </div>
         ) : (
           <div className="rounded-3xl border border-dashed border-[var(--line)] bg-[var(--surface)] px-6 py-12 text-center">
-            <h2 className="text-lg font-extrabold">No materials match</h2>
+            <h2 className="text-lg font-extrabold">{term ? `“${params.get("search")}” is not in the catalogue` : "No materials match"}</h2>
             <p className="mx-auto mt-2 max-w-sm text-sm text-[var(--muted)]">
-              Try fewer filters, or send us your materials list and merchants will quote for you.
+              {term
+                ? "You can still ask for it. It will be sent as a custom material request and merchants can tell you if they can supply or source it."
+                : "Try fewer filters, or send us your materials list and merchants will quote for you."}
             </p>
+            {searchInfo?.otherSpecs?.length > 0 && (
+              <p className="mx-auto mt-2 max-w-sm text-xs text-[var(--muted)]">Other sizes exist (not what you searched): {searchInfo.otherSpecs.map((p) => p.name).join(", ")}</p>
+            )}
+            {term && (
+              <Link to={`/client/quotations/new?mode=manual&material=${encodeURIComponent(params.get("search"))}`} className="primary mx-auto mt-4 inline-flex min-h-12">
+                Request “{params.get("search")}” as a custom material
+              </Link>
+            )}
             <div className="mt-5 flex flex-col justify-center gap-2 sm:flex-row">
               <button type="button" onClick={clearAll} className="h-12 rounded-xl border border-[var(--line)] px-5 text-sm font-bold">
                 Clear filters

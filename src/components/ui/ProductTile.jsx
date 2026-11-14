@@ -2,7 +2,7 @@ import { ShoppingBag } from "lucide-react";
 import { Link } from "react-router-dom";
 import { formatNaira } from "../../utils/formatters";
 
-export default function ProductTile({ product }) {
+export default function ProductTile({ product, note = "" }) {
   let inStock = Number(product.stock ?? 1) > 0;
   return (
     <Link
@@ -19,6 +19,7 @@ export default function ProductTile({ product }) {
         <span className="absolute left-2 top-2 rounded-full bg-white/95 px-2 py-1 text-[11px] font-bold text-[#55515A] shadow-sm">
           {inStock ? "In stock" : "Out of stock"}
         </span>
+        {note && <span className="absolute right-2 top-2 rounded-full bg-[var(--red)] px-2 py-1 text-[11px] font-bold text-white shadow-sm">{note}</span>}
       </div>
       <div className="p-3">
         <p className="line-clamp-1 text-xs font-medium text-[var(--muted)]">{product.category}</p>

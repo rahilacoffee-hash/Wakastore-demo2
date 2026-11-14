@@ -7,9 +7,15 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test:customer": "node scripts/smoke-customer.mjs"
+    "test:customer": "node scripts/smoke-customer.mjs",
+    "test:materials": "node scripts/test-material-extraction.mjs",
+    "test:e2e": "node scripts/e2e-material-flow.mjs",
+    "test:search": "node scripts/test-product-search.mjs",
+    "test:sourcing": "node scripts/test-sourcing.mjs",
+    "test:sourcing-e2e": "node scripts/e2e-sourcing-flow.mjs"
   },
   "dependencies": {
+    "@tailwindcss/vite": "latest",
     "@vitejs/plugin-react": "latest",
     "axios": "latest",
     "framer-motion": "latest",
@@ -17,9 +23,10 @@
     "react": "latest",
     "react-dom": "latest",
     "react-router-dom": "latest",
-    "vite": "latest",
     "tailwindcss": "latest",
-    "@tailwindcss/vite": "latest"
+    "vite": "latest"
   },
-  "devDependencies": {}
+  "devDependencies": {
+    "jsdom": "^31.0.1"
+  }
 }

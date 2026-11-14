@@ -12,6 +12,7 @@ import {
   Trash2,
 } from "lucide-react";
 import { useAppState } from "../../context/AppStateContext";
+import OrderItems from "./OrderItems";
 import { formatNaira } from "../../utils/formatters";
 
 const field =
@@ -54,7 +55,7 @@ export function Cart() {
                     {item.merchant} · Ref: {item.id}
                   </p>
                   <b className="mt-2 block text-sm">
-                    {formatNaira(item.price)} / {item.unit}
+                    {item.kind === "sourcing" ? "Price to be confirmed by the merchant" : `${formatNaira(item.price)} / ${item.unit}`}
                   </b>
                 </div>
                 <div className="flex flex-col items-end justify-between">
@@ -324,7 +325,7 @@ const receiptText = (order) =>
     "ITEMS",
     ...(order.items || []).map(
       (item) =>
-        `${item.name} | Ref: ${item.productRef || item.id || "—"} | ${item.quantity} ${item.unit || "units"} × ${formatNaira(item.unitPrice ?? item.price)} = ${formatNaira(item.lineTotal ?? (item.unitPrice ?? item.price) * item.quantity)}`,
+        `${item.name} | Ref: ${item.productRef || item.id || "—"} | ${item.quantity} ${item.unit || "units"} × ${(item.unitPrice ?? item.price) == null ? "price to be confirmed" : `${formatNaira(item.unitPrice ?? item.price)} = ${formatNaira(item.lineTotal ?? (item.unitPrice ?? item.price) * item.quantity)}`}`,
     ),
     "",
     `Materials subtotal: ${formatNaira(order.subtotal ?? (order.items || []).reduce((s, i) => s + (i.lineTotal ?? i.price * i.quantity), 0))}`,
@@ -422,6 +423,7 @@ export function OrderDetail() {
           {notice}
         </p>
       )}
+      <OrderItems order={order} />
       <section className="mt-5 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-5">
         <div className="flex items-center justify-between gap-3">
           <div>
@@ -565,13 +567,12 @@ export function OrderDetail() {
                       {item.quantity} {item.unit || "units"}
                     </td>
                     <td className="py-3">
-                      {formatNaira(item.unitPrice ?? item.price)}
+                      {(item.unitPrice ?? item.price) == null ? "Pending" : formatNaira(item.unitPrice ?? item.price)}
                     </td>
                     <td className="py-3 text-right font-bold">
-                      {formatNaira(
-                        item.lineTotal ??
-                          (item.unitPrice ?? item.price) * item.quantity,
-                      )}
+                      {(item.unitPrice ?? item.price) == null
+                        ? "Pending"
+                        : formatNaira(item.lineTotal ?? (item.unitPrice ?? item.price) * item.quantity)}
                     </td>
                   </tr>
                 ))}

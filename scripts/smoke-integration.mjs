@@ -34,8 +34,8 @@ const cases = []
 const S = { ...base, quotations: [quote, ...base.quotations] }
 const check = (label, path, session, test) => { n++; withState({ ...S, session }); try { const h = draw(path), ok = test(h); if (!ok) bad++; console.log(ok ? 'ok   ' : 'FAIL ', label, path, h.length) } catch (e) { bad++; console.log('CRASH', label, path, e.message.split('\n')[0]) } }
 const cust = ses('customer', 'customer1@waka.test')
-check('quote create page', '/client/quotations/new', cust, (h) => h.includes('Build your materials list'))
-check('quote create (paste mode)', '/client/quotations/new?mode=paste', cust, (h) => h.includes('Paste your list') || h.includes('Paste materials list'))
+check('quote create page', '/client/quotations/new', cust, (h) => h.includes('Get a quotation') && h.includes('Upload your materials list'))
+check('quote create (paste mode)', '/client/quotations/new?mode=paste', cust, (h) => h.includes('Get a quotation') && h.includes('Type in'))
 check('quotations list shows state quote + old quotes', '/client/quotations', cust, (h) => h.includes('QT-1003') && h.includes('QT-1042'))
 check('quote detail shows 80/60/40', '/client/quotations/QT-1003', cust, (h) => h.includes('80%') && h.includes('60%') && h.includes('40%') && h.includes('Below 60%') && h.includes('Best basket'))
 check('old quote still opens', '/client/quotations/QT-1042', cust, (h) => h.includes('QT-1042'))

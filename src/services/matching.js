@@ -2,9 +2,9 @@
 // Rule: a merchant qualifies when matched requested LINES / total requested LINES >= threshold (default 60%).
 // Value of the order is never part of the calculation.
 
-export const DEFAULT_THRESHOLD = 60
+import { parseQuery, scoreMatch } from './productSearch.js'
 
-const STOPWORDS = new Set(['of', 'the', 'a', 'an', 'for', 'and', 'with', 'in', 'to', 'x'])
+export const DEFAULT_THRESHOLD = 60
 
 const UNIT_ALIASES = {
   bag: 'bag', bags: 'bag',
@@ -40,28 +40,20 @@ export function parseMaterialsList(text = '') {
     })
 }
 
-const tokenize = (s = '') =>
-  String(s).toLowerCase().replace(/×/g, 'x').replace(/[^a-z0-9.x\s]/g, ' ').replace(/(\d)\s+(mm|cm|kg|l|m|in)\b/g, '$1$2')
-    .split(/\s+/).filter((t) => t && !STOPWORDS.has(t))
-
-// Size-like tokens (12mm, 50kg, 60x60, 4in) must match exactly: 12mm rod is NOT a 16mm rod.
-const isSizeToken = (t) => /\d/.test(t)
-
+// Line <-> product matching now lives in services/productSearch.js (one reusable engine for
+// search, suggestions and quotation matching). Category words never count as proof of stock.
 function lineMatchesProduct(line, product) {
   if (product.available === false || product.stock <= 0) return { ok: false, reason: 'out_of_stock' }
   const unitLine = normalizeUnit(line.unit)
   const unitProd = normalizeUnit(product.unit)
   if (unitLine && unitProd && unitLine !== unitProd) return { ok: false, reason: 'unit_mismatch' }
 
-  const want = tokenize([line.brand, line.name, line.specs].filter(Boolean).join(' '))
-  const have = new Set(tokenize([product.name, product.brand, product.specs, ...(product.aliases || [])].filter(Boolean).join(' ')))
-  if (!want.length) return { ok: false, reason: 'empty' }
-
-  const sizes = want.filter(isSizeToken)
-  if (sizes.some((t) => !have.has(t))) return { ok: false, reason: 'spec_mismatch' }
-
-  const hits = want.filter((t) => have.has(t)).length
-  return hits / want.length >= 0.6 ? { ok: true } : { ok: false, reason: 'no_match' }
+  const r = scoreMatch(parseQuery(line), product, { useCategory: false })
+  if (r.kind === 'exact' || (r.kind === 'partial' && r.coverage >= 0.6)) return { ok: true }
+  // "Cement 20" vs "Cement 20kg": suggest it, never treat it as confirmed supply.
+  if (r.kind === 'suggestion') return { ok: false, reason: 'spec_unconfirmed', suggestion: true }
+  if (r.kind === 'conflict') return { ok: false, reason: 'spec_mismatch' }
+  return { ok: false, reason: 'no_match' }
 }
 
 /**
@@ -83,7 +75,8 @@ export function matchQuotation(lines, merchants, products, threshold = DEFAULT_T
         if (!hit) {
           // Same item, different unit? Tell the UI which unit the merchant actually sells it in.
           const near = mine.find((p) => lineMatchesProduct({ ...line, unit: '' }, p).ok)
-          return unmatched.push(near ? { line, soldPerUnit: near.unit } : { line })
+          const suggested = mine.find((p) => lineMatchesProduct(line, p).reason === 'spec_unconfirmed')
+          return unmatched.push({ line, ...(near ? { soldPerUnit: near.unit } : {}), ...(suggested ? { suggestedProduct: suggested } : {}) })
         }
         const availableQty = Math.min(line.quantity, hit.p.stock)
         matched.push({

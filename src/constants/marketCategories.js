@@ -1,34 +1,36 @@
-import { categories } from "./categories.js";
+import {
+  Blocks, Plug, Droplets, Wind, Armchair, DoorOpen, Paintbrush, Grid2X2,
+  PanelsTopLeft, House, Construction, Hammer,
+} from "lucide-react";
+import { MERCHANT_TO_CUSTOMER_CATEGORY } from "./categories.js";
+import { migrateCategory } from "../utils/migrateCategories.js";
 
-// Shopper-facing categories are the SAME 30 official WakaStore merchant
-// categories (src/constants/categories.js is the single source of truth).
-// Products, filters, the Home strip and the Explore page all use these exact
-// names, so a merchant's category always matches what shoppers browse.
-const SHORT_LABELS = {
-  "Chippings/Granite Merchant": "Chippings & Granite",
-  "Iron Rods & Reinforcement Materials Merchant": "Iron Rods",
-  "Roofing Materials & Accessories Merchant": "Roofing",
-  "Screeding & Wall Finishes Materials Merchant": "Wall Finishes",
-  "POP & Gypsum Materials Merchant": "POP & Gypsum",
-  "Steel, Metal & Welding Materials Merchant": "Steel & Welding",
-  "Furniture Fittings & Accessories Merchant": "Furniture Fittings",
-  "Sealants, Silicone & Adhesives Merchant": "Sealants",
-  "Pest Control & Fumigation Supplies Merchant": "Pest Control",
-  "Tile Adhesive & Grout Merchant": "Adhesive & Grout",
-  "Doors, Locks & Hardware Merchant": "Doors & Locks",
-  "Lighting & Light Fittings Merchant": "Lighting",
-  "MDF & Furniture Board Merchant": "MDF & Boards",
-  "Wallpaper & Wall Panel Merchant": "Wallpaper",
-};
-
-const shortLabel = (name) =>
-  SHORT_LABELS[name] || name.replace(/ Materials Merchant$/, "").replace(/ Merchant$/, "");
-
-export const MARKET_CATEGORIES = categories.map(({ name, icon, description }) => ({
-  name,
-  short: shortLabel(name),
-  icon,
-  description,
-}));
+// The 12 customer-facing categories shown to shoppers (Home, Explore,
+// Categories). Merchants and products use the 30 official merchant categories
+// (constants/categories.js); each of those maps to exactly one of these 12.
+export const MARKET_CATEGORIES = [
+  { name: "Building Materials", short: "Building", icon: Blocks, description: "Cement, sand, granite, blocks and adhesives" },
+  { name: "Electrical & Lighting", short: "Electrical", icon: Plug, description: "Cables, conduits, switches, lamps and fittings" },
+  { name: "Plumbing & Sanitary", short: "Plumbing", icon: Droplets, description: "Pipes, fittings, taps and bathroom fixtures" },
+  { name: "AC & HVAC", short: "AC & HVAC", icon: Wind, description: "Air conditioners, ducting and ventilation" },
+  { name: "Wood & Furniture Materials", short: "Wood", icon: Armchair, description: "Timber, plywood, MDF and furniture fittings" },
+  { name: "Doors, Windows & Hardware", short: "Doors", icon: DoorOpen, description: "Doors, locks, glass and window treatments" },
+  { name: "Paints & Wall Finishes", short: "Paints", icon: Paintbrush, description: "Paints, screeding, wallpaper and wall panels" },
+  { name: "Tiles & Flooring", short: "Tiles", icon: Grid2X2, description: "Ceramic, porcelain, marble and floor tiles" },
+  { name: "Ceiling, POP & Partition", short: "Ceiling", icon: PanelsTopLeft, description: "POP, gypsum, ceiling boards and partitions" },
+  { name: "Roofing & Waterproofing", short: "Roofing", icon: House, description: "Roof sheets, accessories and waterproofing" },
+  { name: "Steel, Aluminium & Metal", short: "Steel", icon: Construction, description: "Iron rods, steel, aluminium and welding supplies" },
+  { name: "General Hardware & Consumables", short: "Hardware", icon: Hammer, description: "Tools, sealants, fasteners and site consumables" },
+];
 
 export const MARKET_CATEGORY_NAMES = MARKET_CATEGORIES.map((c) => c.name);
+
+// Customer-facing category (one of the 12) of a product or category string.
+// Products store a merchant category (one of the 30); leftover old names are
+// first migrated onto the 30 by the same routine used when saved state loads.
+export const marketCategoryOf = (productOrCategory) => {
+  const product = typeof productOrCategory === "string" ? { category: productOrCategory } : productOrCategory || {};
+  if (MARKET_CATEGORY_NAMES.includes(product.category)) return product.category;
+  const merchantCategory = migrateCategory(product.category, product.name);
+  return MERCHANT_TO_CUSTOMER_CATEGORY[merchantCategory] || "General Hardware & Consumables";
+};

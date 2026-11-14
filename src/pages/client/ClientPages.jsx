@@ -16,7 +16,7 @@ import {
   ChevronRight,
   Construction,
 } from "lucide-react";
-import { MARKET_CATEGORIES as categories } from "../../constants/marketCategories";
+import { MARKET_CATEGORIES as categories, marketCategoryOf } from "../../constants/marketCategories";
 import { products, orders, quotations } from "../../data/marketplace";
 import { formatNaira } from "../../utils/formatters";
 import ProductCard from "../../components/ui/ProductCard";
@@ -83,7 +83,7 @@ export function Marketplace() {
   const visibleProducts = useMemo(() => {
     const term = search.trim().toLowerCase();
     const result = inventory.filter((product) => {
-      const matchesCategory = activeCategory === "All" || product.category === activeCategory;
+      const matchesCategory = activeCategory === "All" || marketCategoryOf(product) === activeCategory;
       const haystack = `${product.name || ""} ${product.description || ""} ${product.brand || ""} ${product.sku || ""} ${product.category || ""} ${product.subcategory || ""} ${product.merchant || ""}`.toLowerCase();
       const merchant = state.merchants?.find((item) => item.id === product.merchantId);
       const merchantIsActive = !merchant || merchant.status === "approved";
