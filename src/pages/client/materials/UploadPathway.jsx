@@ -111,7 +111,8 @@ export default function UploadPathway({ onExtracted }) {
           onChange={(e) => { addFiles(e.target.files); e.target.value = ""; }} />
         <input ref={replaceRef} type="file" accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf" className="hidden" aria-label="Replace file"
           onChange={(e) => { if (e.target.files[0]) replaceWith(e.target.files[0]); e.target.value = ""; }} />
-        <p className="mt-3 text-xs text-[var(--muted)]">Or drag and drop files here.</p>
+        <p className="mt-3 text-xs text-[var(--muted)]">Or drag and drop files here</p>
+        <p className="mt-3 text-xs text-[vaqr(--muted)]"> Or Export from SmartFixer.</p>
       </div>
 
       {files.length > 0 && (

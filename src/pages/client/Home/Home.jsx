@@ -1,4 +1,3 @@
-
 import {
   ArrowRight,
   BadgeCheck,
@@ -45,25 +44,47 @@ function SectionTitle({ title, to, label = "See all" }) {
   );
 }
 
-function HomeHeader({ search, onSearch, onSubmit, unread }) {
+function HomeHeader({ search, onSearch, onSubmit, unread = 0, firstName }) {
+  const { state } = useAppState();
+
+  // Support the common user/session structures in the app.
+  const user =
+    state?.session?.user ||
+    state?.user ||
+    state?.session ||
+    state?.customer ||
+    state?.profile ||
+    {};
+
+  const rawName =
+    firstName ||
+    user?.firstName ||
+    user?.first_name ||
+    user?.name ||
+    user?.fullName ||
+    user?.full_name ||
+    "";
+
+  const displayName = String(rawName).trim().split(/\s+/)[0] || "";
+
   return (
     <div>
-      <section className="relative isolate overflow-hidden rounded-b-[32px] bg-[linear-gradient(180deg,#B90013_0%,#D8061A_55%,#ED0018_100%)] px-5 pb-16 pt-[max(18px,env(safe-area-inset-top))] text-white sm:px-8 lg:rounded-[28px] lg:px-12 lg:pb-20 lg:pt-10">
-
-        {/* Building-materials yard hero image */}
+      <section className="relative isolate min-h-[350px] overflow-hidden rounded-b-[32px] bg-[#B90013] px-5 pb-16 pt-[max(18px,env(safe-area-inset-top))] text-white sm:px-8 lg:min-h-[390px] lg:rounded-[28px] lg:px-12 lg:pb-20 lg:pt-10">
+        {/* Building materials yard image */}
         <img
           src={BUILDING_YARD_IMAGE}
           alt=""
           aria-hidden="true"
           fetchPriority="high"
-          className="pointer-events-none absolute inset-y-0 right-0 -z-10 h-full w-[78%] object-cover object-center opacity-75 sm:w-[68%] lg:w-[65%]"
+          className="pointer-events-none absolute inset-0 -z-20 h-full w-full object-cover object-center opacity-75"
         />
 
-        {/* Red gradient to keep the text readable */}
-        <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(90deg,#B90013_0%,rgba(185,0,19,.96)_25%,rgba(185,0,19,.78)_52%,rgba(185,0,19,.20)_100%)]" />
+        {/* Readability overlay */}
+        <div className="pointer-events-none absolute inset-0 -z-10 bg-[linear-gradient(90deg,#B90013_0%,rgba(185,0,19,.96)_25%,rgba(185,0,19,.78)_55%,rgba(185,0,19,.20)_100%)]" />
 
         <div className="pointer-events-none absolute -right-16 top-10 -z-10 h-72 w-72 rounded-full bg-white/10 blur-3xl" />
 
+        {/* Mobile navigation */}
         <div className="flex items-center justify-between lg:hidden">
           <div className="[&_img]:h-7 [&_img]:w-auto [&_img]:brightness-0 [&_img]:invert">
             <WakastoreLogo />
@@ -71,60 +92,72 @@ function HomeHeader({ search, onSearch, onSubmit, unread }) {
 
           <Link
             to="/client/notifications"
-            aria-label={`Notifications${unread ? `, ${unread} unread` : ""}`}
-            className="relative grid h-11 w-11 place-items-center rounded-full"
+            aria-label={`Notifications${unread > 0 ? `, ${unread} unread` : ""}`}
+            className="relative grid h-11 w-11 place-items-center rounded-full border border-white/20 bg-white/10 transition hover:bg-white/20"
           >
             <Bell size={22} />
 
             {unread > 0 && (
               <span className="absolute right-0.5 top-0.5 grid h-[18px] min-w-[18px] place-items-center rounded-full bg-[#171717] px-1 text-[10px] font-bold text-white">
-                {unread}
+                {unread > 99 ? "99+" : unread}
               </span>
             )}
           </Link>
         </div>
 
+        {/* Desktop logo */}
+        <div className="absolute right-12 top-10 hidden lg:block [&_img]:h-9 [&_img]:w-auto [&_img]:brightness-0 [&_img]:invert">
+          <WakastoreLogo />
+        </div>
+
+        {/* Delivery address */}
         <Link
           to="/client/account#addresses"
-          className="mt-3 inline-flex h-10 items-center gap-2 rounded-full border border-white/45 px-4 text-[15px] font-semibold lg:mt-0"
+          className="mt-5 inline-flex h-10 items-center gap-2 rounded-full border border-white/40 bg-white/10 px-4 text-sm font-semibold backdrop-blur-sm transition hover:bg-white/20 lg:mt-0"
         >
           <MapPin size={16} aria-hidden="true" />
           Delivery address
           <ChevronDown size={15} aria-hidden="true" />
         </Link>
 
-        <h1 className="relative z-10 mt-5 max-w-[68%] font-[Manrope] text-[28px] font-extrabold leading-[1.05] tracking-[-.035em] sm:max-w-[58%] sm:text-4xl lg:max-w-[520px] lg:text-5xl">
-          Everything You Need to Build,
-          <br />
-          All in One Place.
-        </h1>
+        {/* Welcome content */}
+        <div className="mt-5 max-w-[540px]">
+          <h1 className="max-w-[520px] font-[Manrope] text-[30px] font-black leading-[1.08] tracking-[-0.055em] sm:text-4xl lg:text-5xl">
+            What materials are you building today
+            {displayName && (
+              <span className="font-black text-white">, {displayName}</span>
+            )}
+            ?
+          </h1>
+          <p className="mt-4 max-w-[420px] text-sm leading-6 text-white/85 sm:text-base">
+            Discover trusted building-material merchants, compare quotations,
+            and get the materials you need delivered straight to your site.
+          </p>
+        </div>
 
-        <p className="relative z-10 mt-3 max-w-[65%] text-[15px] leading-[22px] text-white/90 sm:max-w-[52%] lg:max-w-[440px] lg:text-base">
-          Discover trusted building-material merchants, compare quotations,
-          and get the materials you need delivered to your site.
-        </p>
-
-        <div className="h-[84px] lg:h-[96px]" />
+        <div className="h-8 lg:h-10" />
       </section>
 
+      {/* Search */}
       <form
         onSubmit={onSubmit}
         className="relative z-10 -mt-7 px-5 sm:px-8 lg:-mt-8 lg:px-12"
       >
-        <div className="flex h-14 items-center gap-3 rounded-2xl bg-white px-4 shadow-[0_10px_30px_rgba(23,23,23,.14)] lg:max-w-[640px]">
+        <div className="flex h-14 items-center gap-3 rounded-2xl border border-black/[0.04] bg-white px-4 shadow-[0_10px_30px_rgba(23,23,23,.14)] transition focus-within:ring-2 focus-within:ring-[#ED0018]/20 lg:max-w-[640px]">
           <Search size={20} className="shrink-0 text-[#77727B]" />
 
           <input
+            type="search"
             value={search}
             onChange={(e) => onSearch(e.target.value)}
-            placeholder="Search cement, cables, tiles…"
+            placeholder="Search cement, cables, tiles..."
             aria-label="Search building materials"
             className="min-w-0 flex-1 bg-transparent text-base text-[#171717] outline-none placeholder:text-[#85818A]"
           />
 
           <button
             type="submit"
-            className="h-10 rounded-xl bg-[var(--red)] px-4 text-sm font-bold text-white"
+            className="h-10 shrink-0 rounded-xl bg-[#ED0018] px-4 text-sm font-bold text-white transition hover:bg-[#C90016] active:scale-95"
           >
             Search
           </button>
@@ -141,10 +174,7 @@ export default function Home() {
   const { state } = useAppState();
 
   const inventory = (state?.products || demoProducts).filter(
-    (p) =>
-      p.available !== false &&
-      !p.archived &&
-      Number(p.stock ?? 1) > 0,
+    (p) => p.available !== false && !p.archived && Number(p.stock ?? 1) > 0,
   );
 
   const approved = (state?.merchants || []).filter(
@@ -155,15 +185,11 @@ export default function Home() {
     (o) => !/delivered|completed|cancelled/i.test(o.status || ""),
   );
 
-  const unread = (state?.notifications || []).filter(
-    (n) => !n.seen,
-  ).length;
+  const unread = (state?.notifications || []).filter((n) => !n.seen).length;
 
   const popular = inventory.slice(0, 4);
 
-  const popularIds = new Set(
-    popular.map((p) => p.id || p.name),
-  );
+  const popularIds = new Set(popular.map((p) => p.id || p.name));
 
   const recommended = [];
   const seen = new Set();
@@ -184,17 +210,13 @@ export default function Home() {
 
     navigate(
       `/client/explore${
-        search.trim()
-          ? `?search=${encodeURIComponent(search.trim())}`
-          : ""
+        search.trim() ? `?search=${encodeURIComponent(search.trim())}` : ""
       }`,
     );
   }
 
   function countFor(name) {
-    return inventory.filter(
-      (p) => marketCategoryOf(p) === name,
-    ).length;
+    return inventory.filter((p) => marketCategoryOf(p) === name).length;
   }
 
   return (
@@ -204,16 +226,21 @@ export default function Home() {
         onSearch={setSearch}
         onSubmit={goSearch}
         unread={unread}
+        firstName={
+          state?.session?.user?.firstName ||
+          state?.session?.firstName ||
+          state?.session?.name ||
+          state?.user?.firstName ||
+          state?.user?.name ||
+          state?.customer?.name ||
+          ""
+        }
       />
 
       <div className="space-y-9 px-5 pt-8 sm:px-8 lg:space-y-12 lg:px-12 lg:pt-12">
-
         {/* Categories */}
         <section>
-          <SectionTitle
-            title="Shop by category"
-            to="/client/categories"
-          />
+          <SectionTitle title="Shop by category" to="/client/categories" />
 
           <div className="grid grid-cols-4 gap-x-2 gap-y-5 sm:grid-cols-6">
             {MARKET_CATEGORIES.slice(0, 12).map(
@@ -228,9 +255,7 @@ export default function Home() {
                     <Icon size={25} />
                   </span>
 
-                  <span className="text-xs font-bold leading-4">
-                    {short}
-                  </span>
+                  <span className="text-xs font-bold leading-4">{short}</span>
                 </Link>
               ),
             )}
@@ -252,8 +277,8 @@ export default function Home() {
             </h2>
 
             <p className="mt-2 text-sm leading-5 text-[#65585B]">
-              Paste it, type it or upload it once. Compare offers from
-              merchants that can supply at least 60% of it.
+              Paste it, type it or upload it once. Compare offers from merchants
+              that can supply at least 60% of it.
             </p>
 
             <span className="mt-4 inline-flex h-11 items-center gap-2 rounded-xl bg-[var(--red)] px-4 text-sm font-bold text-white">
@@ -311,17 +336,11 @@ export default function Home() {
 
         {/* Popular materials */}
         <section>
-          <SectionTitle
-            title="Popular materials"
-            to="/client/explore"
-          />
+          <SectionTitle title="Popular materials" to="/client/explore" />
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
             {popular.map((p) => (
-              <ProductTile
-                key={p.id || p.name}
-                product={p}
-              />
+              <ProductTile key={p.id || p.name} product={p} />
             ))}
           </div>
         </section>
@@ -347,8 +366,8 @@ export default function Home() {
             </h2>
 
             <p className="mt-3 text-sm leading-6 text-white/85">
-              One marketplace for cement, steel, tiles, electricals
-              and more, from merchants we approve.
+              One marketplace for cement, steel, tiles, electricals and more,
+              from merchants we approve.
             </p>
 
             <Link
@@ -364,17 +383,11 @@ export default function Home() {
         {/* Recommended materials */}
         {recommended.length > 0 && (
           <section>
-            <SectionTitle
-              title="Recommended for you"
-              to="/client/explore"
-            />
+            <SectionTitle title="Recommended for you" to="/client/explore" />
 
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
               {recommended.map((p) => (
-                <ProductTile
-                  key={p.id || p.name}
-                  product={p}
-                />
+                <ProductTile key={p.id || p.name} product={p} />
               ))}
             </div>
           </section>
@@ -416,9 +429,7 @@ export default function Home() {
                 WakaWallet · demo
               </span>
 
-              <span className="block text-[15px] font-bold">
-                View balance
-              </span>
+              <span className="block text-[15px] font-bold">View balance</span>
             </span>
           </Link>
         </section>
