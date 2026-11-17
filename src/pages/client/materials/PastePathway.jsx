@@ -50,10 +50,10 @@ export default function PastePathway({ onExtracted }) {
       </div>
       {error && <p role="alert" className="text-sm font-semibold text-[var(--red)]">{error}</p>}
       <button type="button" disabled={!text.trim()} onClick={run} className="primary min-h-12 w-full disabled:opacity-50">
-        <Sparkles size={18} /> Extract materials with AI (demo)
+        <Sparkles size={18} /> Extract materials with AI
       </button>
       <p className="rounded-xl bg-[var(--soft)] p-3 text-xs leading-5 text-[var(--muted)]">
-        <b>Prototype notice:</b> your text is parsed in this browser. No AI service is called and nothing leaves your device. Anything unclear is flagged for you to confirm; AI never adds prices or stock.
+        <b>Prices are never used.</b> If your list includes prices (unit price, amount, total), they are removed first: merchants quote their own prices. Anything unclear is flagged for you to confirm. AI never adds prices or stock.
       </p>
     </div>
   );

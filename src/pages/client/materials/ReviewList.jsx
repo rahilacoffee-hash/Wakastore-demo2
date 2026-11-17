@@ -1,5 +1,7 @@
-import { AlertTriangle, ArrowLeft, Check, Merge, Plus, Send, Trash2 } from "lucide-react";
+import { useState } from "react";
+import { AlertTriangle, ArrowLeft, Check, Info, Merge, Plus, Send, Trash2 } from "lucide-react";
 import { findDuplicates } from "../../../services/ai/materialParser";
+import { stripPrices } from "../../../services/ai/priceGuard";
 import { searchCatalogue } from "../../../services/productSearch";
 import { useAppState } from "../../../context/AppStateContext";
 import { UNITS, cardCls, fieldCls, newRow, rowProblems } from "./shared";
@@ -27,6 +29,10 @@ function CatalogueHint({ row, products, onUse }) {
 
 export default function ReviewList({ source, label, warnings, rows, setRows, meta, setMeta, onBack, onSubmit, submitting }) {
   let { state } = useAppState();
+  let [priceTyped, setPriceTyped] = useState(false);
+  let noPrices = source === "upload" || source === "paste";
+  let priceRemoved = warnings.find((w) => w.code === "PRICE_REMOVED");
+  let otherWarnings = warnings.filter((w) => w.code !== "PRICE_REMOVED");
   let confirmedAll = meta.confirmedAll;
   let problems = rows.map(rowProblems);
   let blocking = problems.reduce((n, p) => n + (p.length ? 1 : 0), 0);
@@ -34,7 +40,16 @@ export default function ReviewList({ source, label, warnings, rows, setRows, met
   let flaggedCount = rows.filter((r) => r.needsReview && !r.confirmed).length;
   let canSubmit = rows.length > 0 && blocking === 0 && confirmedAll && !submitting;
 
-  function patch(id, changes) {
+  function patch(id, rawChanges) {
+    // Upload and paste lists never carry prices: one typed into a line is removed on the spot.
+    let changes = { ...rawChanges };
+    if (noPrices) {
+      for (let k of ["name", "specs", "notes"]) {
+        if (typeof changes[k] !== "string") continue;
+        let cleaned = stripPrices(changes[k], { tidy: false });
+        if (cleaned.changed) { changes[k] = cleaned.text; setPriceTyped(true); }
+      }
+    }
     setRows(rows.map((r) => {
       if (r.id !== id) return r;
       let next = { ...r, ...changes };
@@ -63,11 +78,17 @@ export default function ReviewList({ source, label, warnings, rows, setRows, met
 
       {label && <p className="rounded-xl bg-[var(--soft)] p-3 text-xs leading-5 text-[var(--muted)]">{label}</p>}
 
-      {(warnings.length > 0 || flaggedCount > 0) && (
+      {(priceRemoved || priceTyped) && (
+        <section className="rounded-2xl border border-[var(--line)] bg-[var(--soft)] p-4 text-sm" role="status" aria-label="Prices removed">
+          <p className="flex items-start gap-2 font-semibold"><Info size={17} className="mt-0.5 shrink-0" /> {priceRemoved ? priceRemoved.message : "Prices cannot be added to a request. Merchants quote their own prices."}</p>
+        </section>
+      )}
+
+      {(otherWarnings.length > 0 || flaggedCount > 0) && (
         <section className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950" role="status" aria-label="Extraction warnings">
           <p className="flex items-center gap-2 font-extrabold"><AlertTriangle size={17} /> {flaggedCount ? `${flaggedCount} line${flaggedCount === 1 ? "" : "s"} need your confirmation` : "Please note"}</p>
           <ul className="mt-2 list-disc space-y-1 pl-5">
-            {warnings.slice(0, 8).map((w, i) => <li key={`${w.code}-${i}`}>{w.message}</li>)}
+            {otherWarnings.slice(0, 8).map((w, i) => <li key={`${w.code}-${i}`}>{w.message}</li>)}
           </ul>
         </section>
       )}
@@ -129,9 +150,9 @@ export default function ReviewList({ source, label, warnings, rows, setRows, met
 
       <div className={`${cardCls} space-y-3`}>
         <h3 className="font-extrabold">Request details</h3>
-        <input className={fieldCls} value={meta.name} onChange={(e) => setMeta({ ...meta, name: e.target.value })} placeholder="Name this list (e.g. 3-bedroom bungalow)" aria-label="List name" />
+        <input className={fieldCls} value={meta.name} onChange={(e) => setMeta({ ...meta, name: e.target.value })} placeholder="List title (e.g.My plumbing list,my guest room work)" aria-label="List name" />
         <input className={fieldCls} value={meta.deliveryLocation} onChange={(e) => setMeta({ ...meta, deliveryLocation: e.target.value })} placeholder="Delivery location (e.g. Gwarinpa, Abuja)" aria-label="Delivery location" />
-        <label className="block text-sm font-bold">Needed by (optional)
+        <label className="block text-sm font-bold">To be delivered by (optional)
           <input type="date" className={`${fieldCls} mt-1`} value={meta.neededBy} onChange={(e) => setMeta({ ...meta, neededBy: e.target.value })} />
         </label>
       </div>

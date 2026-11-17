@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { FileText, ImagePlus, RefreshCw, Sparkles, Trash2, UploadCloud } from "lucide-react";
 import { extractMaterials } from "../../../services/ai/materialExtraction";
 import { ACCEPTED, MAX_FILES, MAX_FILE_MB, cardCls, formatBytes } from "./shared";
+import { MAX_PAYLOAD_CHARS, prepareFile } from "./prepareFiles";
 import ExtractionProgress from "./ExtractionProgress";
 
 export default function UploadPathway({ onExtracted }) {
@@ -59,17 +60,9 @@ export default function UploadPathway({ onExtracted }) {
     setFiles((prev) => prev.map((x) => (x.id === old.id ? fresh : x)));
   }
 
-  // Real local read progress: each file is actually read in the browser.
-  function readFile(f) {
-    return new Promise((resolve, reject) => {
-      let reader = new FileReader();
-      reader.onprogress = (e) => {
-        if (e.lengthComputable) setFiles((prev) => prev.map((x) => (x.id === f.id ? { ...x, readPct: Math.round((e.loaded / e.total) * 100) } : x)));
-      };
-      reader.onload = () => { setFiles((prev) => prev.map((x) => (x.id === f.id ? { ...x, readPct: 100 } : x))); resolve(); };
-      reader.onerror = () => reject(new Error(`Could not read "${f.file.name}".`));
-      reader.readAsArrayBuffer(f.file);
-    });
+  // Each file is really read here (and photos are shrunk) so it can be sent to the AI reader.
+  function setPct(id, pct) {
+    setFiles((prev) => prev.map((x) => (x.id === id ? { ...x, readPct: pct } : x)));
   }
 
   async function run() {
@@ -77,12 +70,19 @@ export default function UploadPathway({ onExtracted }) {
     setError("");
     try {
       setPhase("reading");
-      for (let f of files) await readFile(f);
+      let prepared = [];
+      for (let f of files) {
+        prepared.push(await prepareFile(f.file, (pct) => setPct(f.id, pct)));
+        setPct(f.id, 100);
+      }
+      let total = prepared.reduce((n, p) => n + p.data.length, 0);
+      if (total > MAX_PAYLOAD_CHARS) {
+        setError(`These files add up to ${formatBytes(total)}, which is too much to send at once. Remove a file or use fewer pages (limit about ${formatBytes(MAX_PAYLOAD_CHARS)}).`);
+        setPhase("idle");
+        return;
+      }
       setPhase("extracting");
-      let result = await extractMaterials(
-        { kind: "files", files: files.map((f) => ({ name: f.file.name, type: f.file.type, size: f.file.size })) },
-        { onProgress: setProgress },
-      );
+      let result = await extractMaterials({ kind: "files", files: prepared }, { onProgress: setProgress });
       onExtracted(result, "upload");
     } catch (e) {
       setError(e.message || "Extraction failed. Please try again.");
@@ -112,7 +112,7 @@ export default function UploadPathway({ onExtracted }) {
         <input ref={replaceRef} type="file" accept=".jpg,.jpeg,.png,.webp,.pdf,image/jpeg,image/png,image/webp,application/pdf" className="hidden" aria-label="Replace file"
           onChange={(e) => { if (e.target.files[0]) replaceWith(e.target.files[0]); e.target.value = ""; }} />
         <p className="mt-3 text-xs text-[var(--muted)]">Or drag and drop files here</p>
-        <p className="mt-3 text-xs text-[vaqr(--muted)]"> Or Export from SmartFixer.</p>
+        <p className="mt-3 text-xs text-[var(--muted)]"> Or Export from SmartFixer.</p>
       </div>
 
       {files.length > 0 && (
@@ -143,10 +143,10 @@ export default function UploadPathway({ onExtracted }) {
       {error && <p role="alert" className="text-sm font-semibold text-[var(--red)]">{error}</p>}
 
       <button type="button" disabled={!files.length || busy} onClick={run} className="primary min-h-12 w-full disabled:opacity-50">
-        <Sparkles size={18} /> {busy ? "Preparing files…" : "Extract materials with AI (demo)"}
+        <Sparkles size={18} /> {busy ? "Preparing files…" : "Extract materials with AI"}
       </button>
       <p className="rounded-xl bg-[var(--soft)] p-3 text-xs leading-5 text-[var(--muted)]">
-        <b>Prototype notice:</b> AI extraction is simulated. Your files are previewed on this device only and are not read or uploaded. You will get a sample list to show how review works.
+        <b>How this works:</b> the AI reader reads your photo or PDF and you check every line before anything is sent. If your document shows prices, they are left out: merchants quote their own prices. If the AI reader is offline you will get a clearly labelled sample list instead, so you can still see how review works.
       </p>
     </div>
   );

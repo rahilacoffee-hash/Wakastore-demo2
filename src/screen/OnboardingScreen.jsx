@@ -35,7 +35,7 @@ const SLIDES = [
     accent: "Track every delivery.",
     body: "One checkout, even across several merchants. Each merchant ships and updates separately.",
     note: "Updates at every step.",
-    image: "/onboardingScreen3.webp",
+    image: "/onboarding4.jpeg",
     posMobile: "60% center",
   },
 ];

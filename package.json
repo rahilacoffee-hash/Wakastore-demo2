@@ -12,7 +12,11 @@
     "test:e2e": "node scripts/e2e-material-flow.mjs",
     "test:search": "node scripts/test-product-search.mjs",
     "test:sourcing": "node scripts/test-sourcing.mjs",
-    "test:sourcing-e2e": "node scripts/e2e-sourcing-flow.mjs"
+    "test:sourcing-e2e": "node scripts/e2e-sourcing-flow.mjs",
+    "server": "node server/index.js",
+    "test:price-guard": "node scripts/test-price-guard.mjs",
+    "test:ai-backend": "node scripts/test-ai-backend.mjs",
+    "test:e2e-price": "node scripts/e2e-price-omission.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "latest",

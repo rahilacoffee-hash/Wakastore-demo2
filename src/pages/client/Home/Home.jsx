@@ -86,7 +86,7 @@ function HomeHeader({ search, onSearch, onSubmit, unread = 0, firstName }) {
 
         {/* Mobile navigation */}
         <div className="flex items-center justify-between lg:hidden">
-          <div className="[&_img]:h-7 [&_img]:w-auto [&_img]:brightness-0 [&_img]:invert">
+          <div className="[&_img]:h-12 [&_img]:w-auto [&_img]:brightness-0 [&_img]:invert">
             <WakastoreLogo />
           </div>
 
@@ -122,8 +122,8 @@ function HomeHeader({ search, onSearch, onSubmit, unread = 0, firstName }) {
 
         {/* Welcome content */}
         <div className="mt-5 max-w-[540px]">
-          <h1 className="max-w-[520px] font-[Manrope] text-[30px] font-black leading-[1.08] tracking-[-0.055em] sm:text-4xl lg:text-5xl">
-            What materials are you building today
+          <h1 className="max-w-[520px] font-[Manrope] text-[40px] font-black leading-[1.08] tracking-[-0.055em] sm:text-6xl lg:text-5xl">
+            What materials are you buying today
             {displayName && (
               <span className="font-black text-white">, {displayName}</span>
             )}
