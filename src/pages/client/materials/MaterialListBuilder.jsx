@@ -6,7 +6,6 @@ import UploadPathway from "./UploadPathway";
 import PastePathway from "./PastePathway";
 import ManualPathway from "./ManualPathway";
 import ReviewList from "./ReviewList";
-import { sanitizeExtraction, stripPrices } from "../../../services/ai/priceGuard";
 import { toRow } from "./shared";
 
 let TABS = [
@@ -27,10 +26,8 @@ export default function MaterialListBuilder() {
   let [submitting, setSubmitting] = useState(false);
 
   function fromExtraction(result, source) {
-    // Upload and paste never carry prices: swept again here, whatever produced the result.
-    let safe = sanitizeExtraction(result);
-    setRows(safe.items.map(toRow));
-    setReview({ source, label: result.label, warnings: safe.warnings });
+    setRows(result.items.map(toRow));
+    setReview({ source, label: result.label, warnings: result.warnings });
     setMeta((m) => ({ ...m, confirmedAll: false }));
     window.scrollTo?.({ top: 0 });
   }
@@ -42,15 +39,12 @@ export default function MaterialListBuilder() {
   }
   function submit() {
     setSubmitting(true);
-    // Final guard for upload and paste: no price can ride along in a name, spec or note.
-    let noPrices = review.source === "upload" || review.source === "paste";
-    let clean = (v) => (noPrices ? stripPrices(String(v)).text : String(v)).trim();
     let id = createQuotationFull({
       name: meta.name,
       deliveryLocation: meta.deliveryLocation,
       neededBy: meta.neededBy,
       source: review.source,
-      items: rows.map((r) => ({ id: r.id, name: clean(r.name), quantity: Number(r.quantity), unit: r.unit, specs: clean(r.specs), notes: clean(r.notes), category: "", brand: "" })),
+      items: rows.map((r) => ({ id: r.id, name: r.name.trim(), quantity: Number(r.quantity), unit: r.unit, specs: r.specs.trim(), notes: r.notes.trim(), category: "", brand: "" })),
     });
     navigate(`/client/quotations/${id}`);
   }

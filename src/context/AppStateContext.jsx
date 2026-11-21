@@ -1,5 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { withSeedExtras, merchantIdOf } from "../data/quoteSeed";
+import { DEFAULT_RATE_CARD } from "../services/delivery";
+import { buildLogEntries, retryEntry } from "../services/notificationLog";
 import * as Sourcing from "../services/sourcing";
 import { matchQuotation } from "../services/matching";
 import { migrateCategories } from "../utils/migrateCategories";
@@ -11,7 +13,8 @@ const appStateContextKey = Symbol.for("wakastore.app-state-context");
 const AppState = globalThis[appStateContextKey] ?? createContext(null);
 globalThis[appStateContextKey] = AppState;
 const KEY = "waka-demo-v2";
-const feeRate = 0.025;
+// WakaStore COMMISSION: 5% of materials, deducted from the merchant. Never added to the customer's total.
+const DEFAULT_FEE_RATE = 0.05;
 
 const demoProducts = [
   {
@@ -398,6 +401,8 @@ export const defaultState = {
   wishlist: [],
   wallet: defaultWallet,
   quotations: defaultQuotations,
+  merchantQuotes: [],
+  messages: [],
   refunds: defaultRefunds,
   merchants: demoMerchants,
   customers: demoCustomers,
@@ -432,6 +437,12 @@ export const defaultState = {
     },
   ],
   addresses: [],
+  // Platform configuration (editable by Super Admin). Commission is deducted from the merchant, never added to the customer.
+  settings: { feeRate: 0.05, threshold: 60, multiMerchant: false, invitationHours: 24, quoteValidHours: 48, deliveryRates: DEFAULT_RATE_CARD },
+  withdrawals: [],
+  paymentAttempts: [],
+  notificationLog: [],
+  adminUsers: [],
   session: null,
   toast: null,
 };
@@ -439,7 +450,8 @@ export const defaultState = {
 const ARRAY_FIELDS = [
   "cart", "orders", "products", "wishlist", "quotations", "refunds",
   "merchants", "customers", "notifications", "auditLogs", "sourcing",
-  "merchantUsers", "addresses",
+  "merchantUsers", "addresses", "merchantQuotes", "messages",
+  "withdrawals", "paymentAttempts", "notificationLog", "adminUsers",
 ];
 
 // Older demo sessions may contain partially-shaped values (for example,
@@ -461,6 +473,8 @@ const normalizeState = (candidate) => {
     ...wallet,
     history: Array.isArray(wallet.history) ? wallet.history : [...defaultState.wallet.history],
   };
+  const savedSettings = merged.settings && typeof merged.settings === "object" && !Array.isArray(merged.settings) ? merged.settings : {};
+  merged.settings = { ...defaultState.settings, ...savedSettings, deliveryRates: { ...DEFAULT_RATE_CARD, ...(savedSettings.deliveryRates || {}) } };
   // Orders saved before item-level tracking get per-item assignment fields (idempotent).
   merged.orders = merged.orders.map(Sourcing.upgradeOrder);
   merged.session = merged.session && typeof merged.session === "object" ? merged.session : null;
@@ -479,6 +493,9 @@ const hydrateState = () => {
 
 export function AppStateProvider({ children }) {
   const [state, setState] = useState(hydrateState);
+  const feeRate = Number(state.settings?.feeRate ?? DEFAULT_FEE_RATE);
+  const matchThreshold = Number(state.settings?.threshold ?? 60);
+  Sourcing.setCommissionPercent(feeRate * 100); // keep item-level settlement splits on the configured rate
 
   useEffect(() => {
     localStorage.setItem(KEY, JSON.stringify(state));
@@ -549,7 +566,7 @@ export function AppStateProvider({ children }) {
   const removeAddress = (id) =>
     updateState((prev) => ({ ...prev, addresses: prev.addresses.filter((a) => a.id !== id) }));
 
-  const createOrder = (method = "wallet", deliveryAddress = {}, deliveryFee = 3500) => {
+  const createOrder = (method = "wallet", deliveryAddress = {}, deliveryFee = 3500, extra = {}) => {
     let ref = `WK-${Date.now().toString().slice(-8)}`;
     let created = false;
     updateState((prev) => {
@@ -570,7 +587,7 @@ export function AppStateProvider({ children }) {
       const subtotal = items.reduce((sum, item) => sum + (item.lineTotal || 0), 0);
       const fee = Math.round(subtotal * feeRate);
       const shipping = Math.max(0, Number(deliveryFee) || 0);
-      const total = subtotal + fee + shipping;
+      const total = subtotal + shipping;
       if (method === "wallet" && Number(prev.wallet?.balance || 0) < total) return prev;
       const built = Sourcing.buildItems(ref, items.map((item) => ({
         lineId: item.lineId, name: item.name, specification: item.specs || "", quantity: item.quantity, unit: item.unit,
@@ -583,7 +600,7 @@ export function AppStateProvider({ children }) {
         receiptId: `WKR-${ref.replace('WK-', '')}`,
         date: new Date().toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short" }),
         subtotal, wakastoreFee: fee, deliveryFee: shipping, total,
-        status: "Paid", paymentMethod: method, customerEmail: prev.session?.email || "",
+        status: "Paid", paymentMethod: method, deliveryMethod: extra.deliveryMethod || "merchant_delivery", customerEmail: prev.session?.email || "",
         deliveryAddress: { ...deliveryAddress }, items: orderItems, subOrders: [], ledger: [], payments: [],
       }, prev.merchants);
       const unavailableCount = built.filter((b) => b.availability === "NOT_IN_STOCK").length;
@@ -840,7 +857,7 @@ export function AppStateProvider({ children }) {
       let moved = 0;
       let stuck = 0;
       order.items.filter((i) => i.currentMerchantId === merchantId && i.fulfilment === "PENDING").forEach((i) => {
-        const r = Sourcing.declineSourcing(working, i.itemId, actor, { confirmed: true, allowAvailable: true, reason: "Merchant rejected the order" }, { merchants: prev.merchants, products: prev.products });
+        const r = Sourcing.declineSourcing(working, i.itemId, actor, { confirmed: true, allowAvailable: true, reason: "Merchant rejected the order" }, { merchants: prev.merchants, products: prev.products, multiMerchant: prev.settings?.multiMerchant ?? false });
         if (!r.ok) return;
         working = r.order;
         if (r.rerouted) moved += 1; else stuck += 1;
@@ -1028,24 +1045,30 @@ export function AppStateProvider({ children }) {
       ),
     }));
 
-  const createQuotationFull = ({ name, items, deliveryLocation = "", neededBy = "", source = "manual" }) => {
+  const createQuotationFull = ({ name, items, deliveryLocation = "", neededBy = "", source = "manual", smartfixerJobId = null }) => {
     const id = `QT-${1000 + state.quotations.length + 1}`;
+    const createdAt = new Date();
     const lines = items.map((l, i) => ({
       ...l,
       id: l.id || `line-${i + 1}`,
       quantity: Number(l.quantity),
     }));
-    const m = matchQuotation(lines, state.merchants, state.products, 60);
+    const m = matchQuotation(lines, state.merchants, state.products, matchThreshold);
     const q = {
       id,
       name: name?.trim() || "Materials list",
       date: todayLabel(),
-      status: m.quotationNeedsSourcing ? "Needs sourcing" : "Matched",
+      createdAt: createdAt.toISOString(),
+      merchantResponseDeadlineAt: new Date(createdAt.getTime() + Number(state.settings?.invitationHours ?? 24) * 60 * 60 * 1000).toISOString(),
+      status: m.quotationNeedsSourcing ? "Needs sourcing" : "Awaiting merchant quotations",
       deliveryLocation: String(deliveryLocation).trim(),
       neededBy,
       source,
+      ...(smartfixerJobId ? { smartfixerJobId } : {}),
       items: lines,
       matchedMerchants: m.eligible.map((r) => r.merchant.name),
+      invitedMerchantIds: m.eligible.map((r) => r.merchant.id),
+      matchingThreshold: 60,
     };
     updateState((prev) => ({
       ...prev,
@@ -1054,7 +1077,7 @@ export function AppStateProvider({ children }) {
         {
           id: `n-${Date.now()}`,
           title: "Quotation submitted",
-          detail: `${id}: ${m.eligible.length} eligible merchant(s) found`,
+          detail: `${id}: ${m.eligible.length} eligible merchant(s) invited. Merchants have 24 hours to respond.`,
           seen: false,
         },
         ...prev.notifications,
@@ -1074,8 +1097,164 @@ export function AppStateProvider({ children }) {
     }));
     return id;
   };
-  // sourcingLines: requested materials nobody has in stock. They stay in the cart/order,
-  // unpriced, assigned to the ranked eligible merchant (or to nobody if none qualifies).
+  const selectMerchantQuote = (quotationId, merchantQuoteId) => {
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    const offer = state.merchantQuotes.find((x) => x.id === merchantQuoteId && x.quotationId === quotationId);
+    if (!quotation || !offer || Date.parse(offer.validUntil || 0) <= Date.now()) return false;
+    if ((offer.items || []).length !== quotation.items.length || quotation.items.some((line) => {
+      const item = offer.items.find((entry) => entry.lineId === line.id);
+      return !item || !["CAN_SUPPLY", "CAN_SOURCE"].includes(item.supplyStatus) || Number(item.quantity) !== Number(line.quantity) || !(Number(item.unitPrice) > 0);
+    })) return false;
+    updateState((prev) => ({
+      ...prev,
+      quotations: prev.quotations.map((q) => q.id === quotationId ? { ...q, selectedMerchantQuoteId: merchantQuoteId, merchantConfirmedAt: null, customerApprovedAt: null, status: "Offer selected" } : q),
+    }));
+    return true;
+  };
+  const confirmMerchantQuotation = (quotationId, merchantId) => updateState((prev) => ({
+    ...prev,
+    quotations: prev.quotations.map((q) => q.id === quotationId && q.selectedMerchantQuoteId && prev.merchantQuotes.some((offer) => offer.id === q.selectedMerchantQuoteId && offer.merchantId === merchantId && Date.parse(offer.validUntil || 0) > Date.now()) ? { ...q, merchantConfirmedAt: new Date().toISOString(), status: "Awaiting customer approval" } : q),
+  }));
+  const approveMerchantQuotation = (quotationId, deliveryMethod = "merchant_delivery") => updateState((prev) => ({
+    ...prev,
+    quotations: prev.quotations.map((q) => {
+      const offer = prev.merchantQuotes.find((item) => item.id === q.selectedMerchantQuoteId);
+      return q.id === quotationId && q.merchantConfirmedAt && offer && Date.parse(offer.validUntil || 0) > Date.now()
+        ? { ...q, selectedDeliveryMethod: deliveryMethod, customerApprovedAt: new Date().toISOString(), status: "Approved for payment" }
+        : q;
+    }),
+  }));
+
+  const submitMerchantQuote = ({ quotationId, merchantId, items, deliveryFee = 0, deliveryEstimate = "", deliveryMethods = ["merchant_delivery"], notes = "" }) => {
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    const merchant = state.merchants.find((m) => m.id === merchantId);
+    if (!quotation || !merchant) return { ok: false, error: "Quotation request not found." };
+    if (quotation.selectedMerchantQuoteId) return { ok: false, error: "The customer has already selected an offer. Contact WakaStore Admin if a change is required." };
+    if (Date.parse(quotation.merchantResponseDeadlineAt || 0) <= Date.now()) return { ok: false, error: "The 24-hour merchant response window has expired." };
+    const match = matchQuotation(quotation.items, state.merchants, state.products, matchThreshold);
+    if (!match.eligible.some((entry) => entry.merchant.id === merchantId)) return { ok: false, error: "Your store does not meet the 60% eligibility threshold." };
+    const cleanItems = items.map((item) => ({
+      ...item,
+      supplyStatus: String(item.supplyStatus || "CANNOT_SOURCE"),
+      variation: String(item.variation || "").trim(),
+      unitPrice: Number(item.unitPrice) || 0,
+      quantity: Number(item.quantity),
+      sourcingTime: String(item.sourcingTime || "").trim(),
+      available: ["CAN_SUPPLY", "CAN_SOURCE"].includes(item.supplyStatus),
+    }));
+    if (cleanItems.length !== quotation.items.length || quotation.items.some((line) => !cleanItems.some((item) => item.lineId === line.id))) {
+      return { ok: false, error: "Respond to every requested material line." };
+    }
+    if (cleanItems.some((item) => !["CAN_SUPPLY", "CAN_SOURCE", "CANNOT_SOURCE"].includes(item.supplyStatus))) return { ok: false, error: "Choose one valid response for every material line." };
+    const cannotSource = cleanItems.filter((item) => item.supplyStatus === "CANNOT_SOURCE");
+    if (cannotSource.length) return { ok: false, error: `You marked ${cannotSource.length} item(s) as cannot be sourced. A complete quotation must cover every requested material. Change those lines to Can be supplied or Can be sourced, or do not submit this offer.` };
+    const invalid = cleanItems.find((item) => !item.variation || !(item.unitPrice > 0) || !(item.quantity > 0) || (item.supplyStatus === "CAN_SOURCE" && !item.sourcingTime));
+    if (invalid) return { ok: false, error: "For every line, enter the exact variation and a valid unit price. For items you will source, also provide an estimated sourcing time." };
+    if (cleanItems.some((item) => item.quantity !== Number(quotation.items.find((line) => line.id === item.lineId)?.quantity))) {
+      return { ok: false, error: "Every quotation line must cover the full quantity requested. Partial quantities are not accepted." };
+    }
+    const submittedAt = new Date();
+    const validUntil = new Date(submittedAt.getTime() + Number(state.settings?.quoteValidHours ?? 48) * 60 * 60 * 1000).toISOString();
+    updateState((prev) => ({
+      ...prev,
+      merchantQuotes: [
+        ...prev.merchantQuotes.filter((q) => !(q.quotationId === quotationId && q.merchantId === merchantId)),
+        { id: `MQ-${Date.now()}-${merchantId}`, quotationId, merchantId, merchantName: merchant.name, items: cleanItems, deliveryFee: Number(deliveryFee) || 0, deliveryEstimate: String(deliveryEstimate).trim(), deliveryMethods: deliveryMethods.filter(Boolean), notes: String(notes).trim(), status: "Submitted", submittedAt: submittedAt.toISOString(), validUntil },
+      ],
+      notifications: [{ id: `n-${Date.now()}`, title: "Merchant quotation submitted", detail: `${merchant.name} submitted a complete offer for ${quotationId}. It is valid for 48 hours.`, seen: false }, ...prev.notifications],
+      quotations: prev.quotations.map((q) => q.id === quotationId ? { ...q, status: "Merchant quotations received" } : q),
+    }));
+    return { ok: true };
+  };
+
+  const sendChatMessage = ({ quotationId, merchantId, text: body }) => {
+    const message = String(body || "").trim();
+    if (!message || !state.session) return false;
+    const merchant = state.merchants.find((m) => m.id === merchantId);
+    const id = `msg-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+    updateState((prev) => ({
+      ...prev,
+      messages: [...(prev.messages || []), {
+        id, quotationId, merchantId, senderRole: prev.session?.role || "customer",
+        senderName: prev.session?.name || "WakaStore user", text: message,
+        createdAt: new Date().toISOString(),
+      }],
+      notifications: [{ id: `n-${Date.now()}`, title: "New quotation message", detail: `${prev.session?.name || "A user"} sent a message${merchant ? ` about ${quotationId}` : ""}.`, seen: false, ...(prev.session?.role === "customer" ? { recipientMerchantId: merchantId } : {}) }, ...prev.notifications],
+    }));
+    return true;
+  };
+
+  const payQuotation = (quotationId) => {
+    const quotation = state.quotations.find((q) => q.id === quotationId);
+    const offer = state.merchantQuotes.find((x) => x.id === quotation?.selectedMerchantQuoteId);
+    if (quotation?.orderId) return quotation.orderId; // duplicate-payment protection: a paid quotation never creates a second order
+    if (!quotation || !offer || !quotation.customerApprovedAt || Date.parse(offer.validUntil || 0) <= Date.now()) return null;
+    const requestedLines = quotation.items || [];
+    const items = requestedLines.map((line) => {
+      const quoted = (offer.items || []).find((item) => item.lineId === line.id);
+      if (!quoted || !["CAN_SUPPLY", "CAN_SOURCE"].includes(quoted.supplyStatus) || Number(quoted.quantity) !== Number(line.quantity)) return null;
+      return {
+        name: quoted.variation || line.name,
+        requestedName: line.name,
+        quantity: Number(line.quantity),
+        unit: line.unit,
+        price: Number(quoted.unitPrice),
+        unitPrice: Number(quoted.unitPrice),
+        lineTotal: Number(quoted.unitPrice) * Number(line.quantity),
+        merchant: offer.merchantName,
+        merchantId: offer.merchantId,
+        specification: quoted.variation,
+        supplyStatus: quoted.supplyStatus,
+        sourcingTime: quoted.sourcingTime || "",
+      };
+    });
+    if (items.some((item) => !item) || items.length !== requestedLines.length) return null;
+    const subtotal = items.reduce((sum, item) => sum + item.lineTotal, 0);
+    const deliveryMethod = quotation.selectedDeliveryMethod || "merchant_delivery";
+    const deliveryFee = deliveryMethod === "customer_collection" ? 0 : (Number(offer.deliveryFee) || 0);
+    const commission = Math.round(subtotal * feeRate);
+    const merchantMaterialsProceeds = subtotal - commission;
+    const merchantProceeds = merchantMaterialsProceeds + deliveryFee;
+    const total = subtotal + deliveryFee;
+    const id = `WK-${Date.now().toString().slice(-8)}`;
+    updateState((prev) => ({
+      ...prev,
+      orders: [{
+        id,
+        receiptId: `WKR-${id.replace("WK-", "")}`,
+        date: new Date().toLocaleString("en-NG", { dateStyle: "medium", timeStyle: "short" }),
+        subtotal,
+        wakastoreFee: commission,
+        commissionRate: feeRate,
+        commissionBasis: "materials_only",
+        deliveryFee,
+        total,
+        status: "Payment verified · Funds pending",
+        paymentStatus: "VERIFIED",
+        settlementStatus: "PENDING_CUSTOMER_ACCEPTANCE",
+        paymentMethod: "Demo payment",
+        paymentVerifiedAt: new Date().toISOString(),
+        customerAcceptanceStatus: "AWAITING_DELIVERY",
+        deliveryMethod,
+        fullOrderRequired: true,
+        merchantId: offer.merchantId,
+        merchantName: offer.merchantName,
+        merchantMaterialsProceeds,
+        merchantProceeds,
+        platformCommission: commission,
+        customerEmail: prev.session?.email || "",
+        deliveryAddress: { address: quotation.deliveryLocation || "To be confirmed" },
+        items,
+        subOrders: [{ merchantId: offer.merchantId, merchantName: offer.merchantName, status: "Processing", items }],
+        ledger: [{ type: "CUSTOMER_PAYMENT", status: "VERIFIED", amount: total, at: new Date().toISOString() }, { type: "FUNDS_HELD_PENDING", status: "PENDING", amount: total, at: new Date().toISOString() }],
+        payments: [],
+      }, ...prev.orders],
+      quotations: prev.quotations.map((q) => q.id === quotationId ? { ...q, status: "Paid — funds pending acceptance", orderId: id, paidAt: new Date().toISOString() } : q),
+      notifications: [{ id: `n-${Date.now()}`, title: "Payment verified · funds pending", detail: `${quotationId} was paid. Funds remain pending until complete delivery and customer acceptance.`, seen: false }, ...prev.notifications],
+    }));
+    return id;
+  };
+
   const quoteToCart = (quotationId, picks, sourcingLines = []) =>
     updateState((prev) => ({
       ...prev,
@@ -1140,7 +1319,7 @@ export function AppStateProvider({ children }) {
     });
 
   const declineItemSourcing = (orderId, itemId, details) =>
-    runItemAction(orderId, itemId, (o, a, s) => Sourcing.declineSourcing(o, itemId, a, details, { merchants: s.merchants, products: s.products }), (prev, r, current) => {
+    runItemAction(orderId, itemId, (o, a, s) => Sourcing.declineSourcing(o, itemId, a, details, { merchants: s.merchants, products: s.products, multiMerchant: s.settings?.multiMerchant ?? false }), (prev, r, current) => {
       const it = itemOf(r.order, itemId);
       const from = itemOf(current, itemId).currentMerchantId;
       const base = { auditLogs: [audit(merchantName(prev, from), "Declined to source item", orderId, `${it.name}: ${r.rerouted ? `rerouted to ${merchantName(prev, it.currentMerchantId)}` : "no eligible merchant"}`)] };
@@ -1160,7 +1339,7 @@ export function AppStateProvider({ children }) {
       const r = Sourcing.decidePrice(o, itemId, a, decision);
       if (!r.ok || decision !== "approve") return r;
       const it = itemOf(o, itemId);
-      const charge = it.unitPrice * it.quantity + Math.round(it.unitPrice * it.quantity * feeRate);
+      const charge = it.unitPrice * it.quantity;
       if (o.paymentMethod === "wallet" && Number(s.wallet?.balance || 0) < charge) return { ok: false, code: "INSUFFICIENT_FUNDS", error: `Your demo wallet needs ₦${charge.toLocaleString("en-NG")} to approve this price. Top up and try again.` };
       return { ...r, charge };
     }, (prev, r) => {
@@ -1200,6 +1379,46 @@ export function AppStateProvider({ children }) {
       };
     });
 
+  const settleQuotationOrder = (order, acceptedBy = "customer") => ({
+    ...order,
+    status: "Completed",
+    customerAcceptanceStatus: "ACCEPTED",
+    settlementStatus: "SETTLED",
+    acceptedAt: new Date().toISOString(),
+    acceptedBy,
+    ledger: [
+      ...(order.ledger || []),
+      { type: "CUSTOMER_ACCEPTANCE", status: "CONFIRMED", at: new Date().toISOString(), by: acceptedBy },
+      { type: "MERCHANT_SETTLEMENT", status: "RELEASED", amount: Number(order.merchantProceeds || 0), at: new Date().toISOString() },
+      { type: "WAKASTORE_COMMISSION", status: "ALLOCATED", amount: Number(order.platformCommission || 0), at: new Date().toISOString() },
+    ],
+  });
+  const acceptQuotationOrder = (orderId) => {
+    const current = state.orders.find((order) => order.id === orderId);
+    if (state.session?.role !== "customer" || !current || current.customerEmail !== state.session?.email || !current.fullOrderRequired || current.customerAcceptanceStatus !== "AWAITING_DELIVERY" || !(current.subOrders || []).some((sub) => sub.status === "Delivered")) return false;
+    updateState((prev) => ({
+      ...prev,
+      orders: prev.orders.map((order) => order.id === orderId ? settleQuotationOrder(order, "customer") : order),
+      notifications: [{ id: `n-${Date.now()}`, title: "Order accepted · settlement released", detail: `${orderId}: customer accepted the complete delivery. Merchant proceeds and WakaStore commission have been allocated in this demo.`, seen: false }, ...prev.notifications],
+    }));
+    return true;
+  };
+  const adminResolveQuotationAcceptance = (orderId, outcome = "release", noteText = "") => {
+    const current = state.orders.find((order) => order.id === orderId);
+    if (!["admin", "super-admin"].includes(state.session?.role) || !current || !current.fullOrderRequired || current.customerAcceptanceStatus !== "AWAITING_DELIVERY" || !(current.subOrders || []).some((sub) => sub.status === "Delivered")) return false;
+    updateState((prev) => ({
+      ...prev,
+      orders: prev.orders.map((order) => {
+        if (order.id !== orderId) return order;
+        if (outcome === "release") return { ...settleQuotationOrder(order, prev.session?.name || "admin"), adminResolution: String(noteText || "Admin reviewed delivery evidence and authorized settlement."), adminResolvedAt: new Date().toISOString() };
+        return { ...order, adminReviewStatus: "UNDER_REVIEW", adminReviewNote: String(noteText || "Admin contacted the customer and is investigating."), adminReviewUpdatedAt: new Date().toISOString() };
+      }),
+      auditLogs: [{ id: `audit-${Date.now()}`, actor: prev.session?.name || "Admin", action: outcome === "release" ? "Released pending quotation settlement" : "Opened acceptance investigation", entity: orderId, date: new Date().toLocaleString("en-NG"), details: String(noteText || "") }, ...prev.auditLogs],
+      notifications: [{ id: `n-${Date.now()}`, title: outcome === "release" ? "Admin released pending funds" : "Admin review opened", detail: `${orderId}: ${noteText || (outcome === "release" ? "Settlement authorized after review." : "Customer acceptance is under investigation.")}`, seen: false }, ...prev.notifications],
+    }));
+    return true;
+  };
+
   const setMerchantSourcing = (enabled) => {
     const id = merchantIdOf(state);
     if (!id || state.session?.role !== "merchant") return { ok: false, error: "Only a merchant can change this." };
@@ -1207,9 +1426,84 @@ export function AppStateProvider({ children }) {
     return { ok: true };
   };
 
+  /* ---------------------------------------------------------------- payment attempts (SIMULATED provider) */
+  const PAYMENT_FAILURES = {
+    declined: "Card declined by the issuer (simulated).",
+    insufficient: "Insufficient funds (simulated).",
+    timeout: "The payment provider did not confirm the transaction (simulated).",
+  };
+  // Records every attempt. `key` is an idempotency key per checkout session: once an attempt with that key has
+  // succeeded, further attempts return the same success and never charge twice. An unconfirmed (timed-out)
+  // attempt blocks a new charge until an admin reconciles it with the provider.
+  const attemptPayment = ({ key, kind = "order", ref = "", amount = 0, method = "card", outcome = "success" }) => {
+    const prior = (state.paymentAttempts || []).filter((a) => a.key === key);
+    const won = prior.find((a) => a.status === "success");
+    if (won) return { ok: true, duplicate: true, attemptId: won.id };
+    if (prior.some((a) => a.status === "unconfirmed")) {
+      return { ok: false, status: "unconfirmed", error: "Your earlier payment has not been confirmed by the provider yet. WakaStore will reconcile it before you can pay again, so you are never charged twice." };
+    }
+    const status = outcome === "success" ? "success" : outcome === "timeout" ? "unconfirmed" : "failed";
+    const attempt = {
+      id: `PAY-${Date.now().toString().slice(-7)}-${(state.paymentAttempts || []).length + 1}`,
+      key, kind, ref, amount: Number(amount) || 0, method, status,
+      reason: status === "success" ? "" : PAYMENT_FAILURES[outcome] || "Payment failed (simulated).",
+      at: new Date().toISOString(),
+    };
+    updateState((prev) => ({
+      ...prev,
+      paymentAttempts: [attempt, ...prev.paymentAttempts],
+      notifications: status === "success" ? prev.notifications : [{ id: `n-${Date.now()}`, title: status === "failed" ? "Payment failed" : "Payment not confirmed", detail: `${ref || "Your payment"}: ${attempt.reason}`, seen: false }, ...prev.notifications],
+    }));
+    return status === "success" ? { ok: true, attemptId: attempt.id } : { ok: false, status, attemptId: attempt.id, error: attempt.reason };
+  };
+  // Admin settles an unconfirmed attempt after checking the provider: confirm it, or mark it failed so the customer can retry.
+  const reconcilePayment = (attemptId, decision, note = "") =>
+    updateState((prev) => ({
+      ...prev,
+      paymentAttempts: prev.paymentAttempts.map((a) => a.id === attemptId ? { ...a, status: decision === "confirm" ? "success" : "failed", reason: decision === "confirm" ? "" : "Not received by provider. Marked failed by admin.", reconciledAt: new Date().toISOString(), reconciledBy: prev.session?.name || "Admin", reconcileNote: note } : a),
+      auditLogs: [{ id: `audit-${Date.now()}`, actor: prev.session?.name || "Admin", action: decision === "confirm" ? "Confirmed an unconfirmed payment" : "Marked an unconfirmed payment as failed", entity: attemptId, date: new Date().toLocaleString("en-NG"), details: note || "Reconciled against the payment provider record (simulated)." }, ...prev.auditLogs],
+    }));
+
+  /* ---------------------------------------------------------------- notification delivery log */
+  useEffect(() => {
+    const known = new Set((state.notificationLog || []).map((e) => e.notificationId));
+    if (!state.notifications.some((n) => n.id && !known.has(n.id))) return;
+    setState((prev) => {
+      const have = new Set((prev.notificationLog || []).map((e) => e.notificationId));
+      const add = prev.notifications.filter((n) => n.id && !have.has(n.id)).flatMap((n) => buildLogEntries(n));
+      return add.length ? { ...prev, notificationLog: [...add, ...(prev.notificationLog || [])].slice(0, 400) } : prev;
+    });
+  }, [state.notifications]);
+  const retryNotification = (entryId) =>
+    updateState((prev) => ({ ...prev, notificationLog: prev.notificationLog.map((e) => (e.id === entryId ? retryEntry(e) : e)) }));
+
+  /* ---------------------------------------------------------------- dispatch and proof of delivery */
+  // Stores the merchant's record AND moves the sub-order status in one update, so the two can never disagree.
+  const recordFulfilmentStep = (orderId, merchantId, status, key, record) =>
+    updateState((prev) => {
+      const order = prev.orders.find((o) => o.id === orderId);
+      const target = (order?.subOrders || []).find((x) => x.merchantId === merchantId && !["Rejected", "Reassigned"].includes(x.status));
+      if (!order || !target) return prev;
+      const at = new Date().toISOString();
+      const title = key === "dispatch" ? (status === "Ready for collection" ? "Order ready for collection" : "Order dispatched") : "Delivery completed";
+      const detail = key === "dispatch"
+        ? `${orderId}: ${status === "Ready for collection" ? `ready for collection${record.pickupCode ? ` (pickup code ${record.pickupCode})` : ""}` : `on its way with ${record.carrier || "the merchant"}${record.eta ? `, expected ${record.eta}` : ""}`}.`
+        : `${orderId}: delivery recorded (received by ${record.receivedBy}). Please review and accept the complete delivery.`;
+      return {
+        ...prev,
+        orders: prev.orders.map((o) => o.id !== orderId ? o : { ...o, [key]: { ...record, merchantId, at }, subOrders: o.subOrders.map((x) => x === target ? { ...x, status, updatedAt: at } : x) }),
+        notifications: [{ id: `n-${Date.now()}`, title, detail, seen: false }, ...prev.notifications],
+      };
+    });
+
   const value = useMemo(
     () => ({
       state,
+      updateState,
+      attemptPayment,
+      reconcilePayment,
+      retryNotification,
+      recordFulfilmentStep,
       addToCart,
       updateQuantity,
       removeFromCart,
@@ -1242,7 +1536,13 @@ export function AppStateProvider({ children }) {
       signInWithPassword,
       resubmitMerchant,
       createQuotationFull,
+      submitMerchantQuote,
+      selectMerchantQuote,
+      confirmMerchantQuotation,
+      approveMerchantQuotation,
       quoteToCart,
+      sendChatMessage,
+      payQuotation,
       confirmItemSourcing,
       declineItemSourcing,
       decideItemPrice,
@@ -1252,6 +1552,8 @@ export function AppStateProvider({ children }) {
       resolveItemDispute,
       adminAssignItem,
       setMerchantSourcing,
+      acceptQuotationOrder,
+      adminResolveQuotationAcceptance,
     }),
     [state],
   );

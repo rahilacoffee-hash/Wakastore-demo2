@@ -1,3 +1,5 @@
+> **Current quotation-flow note (20 November 2026):** The updated, approved quotation workflow is documented in `FINAL-PROTOTYPE-NEW-FLOW.md`. Where this older MVP specification conflicts with that document on merchant invitations, full-order quotation responses, commission, settlement, delivery or acceptance, use the current flow document as the prototype reference.
+
 # WakaStore MVP — Product and Development Specification
 
 **Status:** Product baseline for the next implementation phase  

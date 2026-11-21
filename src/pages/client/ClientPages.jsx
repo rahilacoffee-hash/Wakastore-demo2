@@ -194,6 +194,9 @@ export function Quotations() {
         <NavLink className="primary" to="/client/quotations/new">
           <Plus /> Start new quotation
         </NavLink>
+        <NavLink className="primary" to="/client/smartfixer">
+          Import from SmartFixer
+        </NavLink>
       </section>
       <div className="quote-actions">
         <button onClick={() => navigate("/client/quotations/new?mode=upload")}>

@@ -24,8 +24,9 @@ const products = [
   { id: 'p6', merchantId: 'm3', name: 'Iron Rod 12mm', price: 14000, stock: 20, unit: 'lengths' }
 ]
 const result = matchTwoMerchantOffers(lines, merchants, products)
-assert.equal(result.offersFound, 2, 'Return no more than two qualified merchants')
+assert.equal(result.offersFound, 3, 'Send the quotation request to every merchant meeting the 60% threshold')
 assert(result.offers.every((offer) => offer.items.length === lines.length), 'Every merchant offer must preserve the full materials list')
 assert(result.offers.every((offer) => offer.items[2].supplyType === 'merchant-sourcing-required'), 'Missing materials must be marked for sourcing')
 assert(result.offers.every((offer) => offer.items[2].unitPrice === null), 'Do not invent prices for outsourced materials')
-console.log('WakaStore MVP matching tests passed (30 categories; two complete-list offer templates).')
+assert.equal(result.dispatchedToAllEligible, true, 'All eligible merchants must receive the request')
+console.log('WakaStore matching tests passed (30 categories; all eligible merchants receive complete-list request templates).')

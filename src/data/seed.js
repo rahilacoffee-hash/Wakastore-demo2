@@ -4,7 +4,7 @@ const P = (id, merchantId, name, category, unit, price, stock, aliases = []) => 
 
 export const seedState = () => ({
   seq: 1000,
-  settings: { feeRate: 0.025, threshold: 60, resubmitWorkingDays: 5, holidays: [] },
+  settings: { feeRate: 0.05, multiMerchant: false, threshold: 60, resubmitWorkingDays: 5, holidays: [] },
   users: [
     { id: 'c-1', role: 'customer', name: 'Ada Okafor', email: 'customer1@waka.test', password: 'waka123', phone: '+234 810 200 5001', status: 'active' },
     { id: 'c-2', role: 'customer', name: 'Kelechi Martins', email: 'customer2@waka.test', password: 'waka123', phone: '+234 810 200 5002', status: 'active' },

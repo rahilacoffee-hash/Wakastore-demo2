@@ -1,5 +1,7 @@
 
-import { useState } from "react";
+import { useRef, useState } from "react";
+import PaymentSimulator from "../../components/PaymentSimulator";
+import { DELIVERY_METHODS, quoteDelivery } from "../../services/delivery";
 import { jsPDF } from "jspdf";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
@@ -10,12 +12,14 @@ import {
   Minus,
   Plus,
   Share2,
+  ShieldCheck,
   ShoppingBag,
   Trash2,
 } from "lucide-react";
 
 import { useAppState } from "../../context/AppStateContext";
 import OrderItems from "./OrderItems";
+import { DeliveryRecordCard } from "../DeliveryRecords";
 import { formatNaira } from "../../utils/formatters";
 
 const field =
@@ -31,7 +35,7 @@ const DELIVERY_FEE = 3500;
 /* -------------------------------------------------------------------------- */
 
 export function Cart() {
-  const { state, updateQuantity, removeFromCart, feeRate } =
+  const { state, updateQuantity, removeFromCart } =
     useAppState();
 
   const navigate = useNavigate();
@@ -45,8 +49,7 @@ export function Cart() {
     0,
   );
 
-  const fee = Math.round(subtotal * feeRate);
-  const total = subtotal + fee + DELIVERY_FEE;
+  const total = subtotal; // delivery is calculated at checkout from the method and address
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-5 sm:px-6">
@@ -151,14 +154,10 @@ export function Cart() {
                 <b>{formatNaira(subtotal)}</b>
               </p>
 
-              <p className="flex justify-between">
-                <span>WakaStore fee</span>
-                <b>{formatNaira(fee)}</b>
-              </p>
 
               <p className="flex justify-between">
                 <span>Delivery</span>
-                <b>{formatNaira(DELIVERY_FEE)}</b>
+                <b className="text-xs">Calculated at checkout</b>
               </p>
             </div>
 
@@ -185,7 +184,7 @@ export function Cart() {
 /* -------------------------------------------------------------------------- */
 
 export function Checkout() {
-  const { state, createOrder, feeRate } = useAppState();
+  const { state, createOrder, attemptPayment } = useAppState();
   const navigate = useNavigate();
 
   const cart = state?.cart || [];
@@ -203,6 +202,9 @@ export function Checkout() {
   });
 
   const [error, setError] = useState("");
+  const [deliveryMethod, setDeliveryMethod] = useState("merchant_delivery");
+  const [outcome, setOutcome] = useState("success"); // demo: forces the simulated provider response
+  const payKey = useRef(`CHK-${Date.now()}`); // idempotency key: one successful charge per checkout session
 
   const subtotal = cart.reduce(
     (total, item) =>
@@ -212,8 +214,10 @@ export function Checkout() {
     0,
   );
 
-  const fee = Math.round(subtotal * feeRate);
-  const total = subtotal + fee + DELIVERY_FEE;
+  const cartMerchants = [...new Set(cart.map((i) => i.merchantId).filter(Boolean))].map((id) => (state?.merchants || []).find((m) => m.id === id)).filter(Boolean);
+  const quote = quoteDelivery({ method: deliveryMethod, address, merchants: cartMerchants, rateCard: state?.settings?.deliveryRates });
+  const deliveryFee = quote.available ? quote.fee : 0;
+  const total = subtotal + deliveryFee;
 
   const set = (key, value) => {
     setAddress((current) => ({
@@ -252,7 +256,26 @@ export function Checkout() {
       return;
     }
 
-    const id = createOrder(method, address, DELIVERY_FEE);
+    if (!quote.available) {
+      setError(quote.note);
+      return;
+    }
+
+    const paid = attemptPayment({
+      key: payKey.current,
+      kind: "cart",
+      ref: "Cart checkout",
+      amount: total,
+      method,
+      outcome: method === "wallet" ? "success" : outcome,
+    });
+
+    if (!paid.ok) {
+      setError(paid.error);
+      return;
+    }
+
+    const id = createOrder(method, address, deliveryFee, { deliveryMethod });
 
     if (!id) {
       setError(
@@ -381,6 +404,25 @@ export function Checkout() {
               />
             </label>
           </div>
+
+          <div className="border-t border-[var(--line)] pt-4">
+            <h2 className="font-bold">Delivery method</h2>
+            <div className="mt-2 space-y-2">
+              {DELIVERY_METHODS.map((m) => {
+                const q = quoteDelivery({ method: m.id, address, merchants: cartMerchants, rateCard: state?.settings?.deliveryRates });
+                return (
+                  <label key={m.id} className={`flex cursor-pointer items-start gap-3 rounded-xl border p-3 text-sm ${deliveryMethod === m.id ? "border-[var(--red)] bg-[var(--blush)]" : "border-[var(--line)]"} ${q.available || m.id === "customer_collection" ? "" : "opacity-60"}`}>
+                    <input type="radio" name="delivery-method" className="mt-1" checked={deliveryMethod === m.id} onChange={() => { setDeliveryMethod(m.id); setError(""); }} />
+                    <span className="min-w-0 flex-1">
+                      <b>{m.label}</b>
+                      <span className="block text-xs text-[var(--muted)]">{q.available ? q.note : q.note}</span>
+                    </span>
+                    <b className="whitespace-nowrap">{q.available ? (q.fee ? formatNaira(q.fee) : "Free") : "n/a"}</b>
+                  </label>
+                );
+              })}
+            </div>
+          </div>
         </section>
 
         <aside className={`${card} h-fit`}>
@@ -419,14 +461,10 @@ export function Checkout() {
               <b>{formatNaira(subtotal)}</b>
             </p>
 
-            <p className="flex justify-between">
-              <span>WakaStore fee</span>
-              <b>{formatNaira(fee)}</b>
-            </p>
 
             <p className="flex justify-between">
               <span>Delivery fee</span>
-              <b>{formatNaira(DELIVERY_FEE)}</b>
+              <b>{quote.available ? (deliveryFee ? formatNaira(deliveryFee) : "Free (pickup)") : "Enter city and state"}</b>
             </p>
 
             <p className="flex justify-between border-t border-[var(--line)] pt-3 text-base font-extrabold">
@@ -434,6 +472,8 @@ export function Checkout() {
               <span>{formatNaira(total)}</span>
             </p>
           </div>
+
+          {method !== "wallet" && <PaymentSimulator value={outcome} onChange={setOutcome} />}
 
           <p className="mt-3 text-xs text-[var(--muted)]">
             Demo checkout: no live card or bank payment is processed.
@@ -750,11 +790,15 @@ const generateReceiptPdf = (order) => {
   divider();
   section("PAYMENT SUMMARY");
 
-  const totals = [
-    ["Materials subtotal", getOrderSubtotal(order)],
-    ["WakaStore service fee", order.wakastoreFee ?? 0],
-    ["Delivery fee", order.deliveryFee ?? 0],
-  ];
+  const totals = order.fullOrderRequired
+    ? [
+        ["Materials subtotal", getOrderSubtotal(order)],
+        ["Delivery fee", order.deliveryFee ?? 0],
+      ]
+    : [
+        ["Materials subtotal", getOrderSubtotal(order)],
+        ["Delivery fee", order.deliveryFee ?? 0],
+      ];
 
   totals.forEach(([label, value]) => {
     ensureSpace(8);
@@ -854,7 +898,7 @@ const generateReceiptPdf = (order) => {
 
 export function OrderDetail() {
   const { id } = useParams();
-  const { state } = useAppState();
+  const { state, acceptQuotationOrder, notify } = useAppState();
 
   const order = (state?.orders || []).find(
     (item) => String(item.id) === String(id),
@@ -1039,7 +1083,45 @@ export function OrderDetail() {
         </p>
       )}
 
+      <DeliveryRecordCard order={order} />
+
       <OrderItems order={order} />
+
+      {order.fullOrderRequired && (
+        <section className="mt-5 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-5">
+          <div className="flex items-center gap-2">
+            <ShieldCheck size={18} className="text-[var(--red)]" />
+            <h2 className="text-lg font-extrabold">Payment protection & order acceptance</h2>
+          </div>
+          <p className="mt-2 text-sm text-[var(--muted)]">
+            Your payment has been verified, but the funds remain pending. The merchant must deliver the complete order before you accept it.
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <div className="rounded-xl bg-[var(--soft)] p-3 text-xs">
+              <span className="text-[var(--muted)]">Settlement status</span>
+              <b className="mt-1 block">{order.settlementStatus === "SETTLED" ? "Released after acceptance" : order.adminReviewStatus === "UNDER_REVIEW" ? "Admin review in progress" : "Funds pending acceptance"}</b>
+            </div>
+            <div className="rounded-xl bg-[var(--soft)] p-3 text-xs">
+              <span className="text-[var(--muted)]">Fulfilment method</span>
+              <b className="mt-1 block">{({ merchant_delivery: "Merchant delivery", customer_collection: "Customer collection", wakarider: "WakaRider" })[order.deliveryMethod] || "To be confirmed"}</b>
+            </div>
+          </div>
+          {order.customerAcceptanceStatus === "AWAITING_DELIVERY" && (order.subOrders || []).some((sub) => sub.status === "Delivered") && (
+            <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+              <b className="text-sm text-emerald-900">The merchant marked the complete order as delivered.</b>
+              <p className="mt-1 text-xs text-emerald-800">Inspect every material before confirming acceptance. If anything is wrong, contact WakaStore support instead of accepting.</p>
+              <button className="mt-3 w-full rounded-xl bg-[var(--red)] px-4 py-3 text-sm font-bold text-white" onClick={() => {
+                const ok = acceptQuotationOrder(order.id);
+                notify(ok ? "Complete order accepted. Settlement has been allocated in this demo." : "We could not accept this order. Contact support for assistance.", ok ? "success" : "error");
+              }}>Accept complete delivery & release settlement</button>
+            </div>
+          )}
+          {order.customerAcceptanceStatus === "AWAITING_DELIVERY" && !(order.subOrders || []).some((sub) => sub.status === "Delivered") && (
+            <p className="mt-3 rounded-xl bg-amber-50 p-3 text-xs text-amber-900">Settlement stays pending until the merchant marks the complete order delivered and you accept it. If you do not respond, WakaStore admin will contact you and review the delivery before making a settlement decision.</p>
+          )}
+          {order.settlementStatus === "SETTLED" && <p className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm font-bold text-emerald-800">Complete delivery accepted. Settlement has been released.</p>}
+        </section>
+      )}
 
       {/* Merchant fulfilment tracking */}
 
@@ -1263,10 +1345,6 @@ export function OrderDetail() {
             <b>{formatNaira(getOrderSubtotal(order))}</b>
           </p>
 
-          <p className="flex justify-between">
-            <span>WakaStore service fee</span>
-            <b>{formatNaira(order.wakastoreFee ?? 0)}</b>
-          </p>
 
           <p className="flex justify-between">
             <span>Delivery fee</span>

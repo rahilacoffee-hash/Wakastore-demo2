@@ -1,3 +1,7 @@
+import { moneyByMerchant } from "../services/ledger";
+import { DispatchProofPanel, DeliveryRecordCard } from "./DeliveryRecords";
+import BulkInventoryUpload from "./BulkInventoryUpload";
+import { MerchantDocuments, MerchantDocumentReview } from "./MerchantDocuments";
 import { useMemo, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import {
@@ -92,7 +96,8 @@ const demoAccounts = [
 function authEntry(role) {
   if (role === "customer") return "/client/overview";
   if (role === "merchant") return "/merchant/overview";
-  if (role === "admin" || role === "super-admin") return "/admin/overview";
+  if (role === "super-admin") return "/super-admin/overview";
+  if (role === "admin") return "/admin/overview";
   return "/login";
 }
 
@@ -218,7 +223,7 @@ export function RequireRole({ allowedRoles, children }) {
   const role = appState?.state?.session?.role;
   const location = useLocation();
   if (!role || !allowedRoles.includes(role)) {
-    const adminArea = location.pathname.startsWith("/admin");
+    const adminArea = location.pathname.startsWith("/admin") || location.pathname.startsWith("/super-admin");
     return <Navigate to={adminArea ? "/admin/login" : "/welcome"} replace />;
   }
   return children;
@@ -346,6 +351,152 @@ export function MerchantDashboard() {
   );
 }
 
+export function MerchantQuotationRequests() {
+  const { state, submitMerchantQuote, confirmMerchantQuotation, notify } = useAppState();
+  const merchantId = merchantIdOf(state);
+  const merchant = state.merchants.find((m) => m.id === merchantId);
+  const [drafts, setDrafts] = useState({});
+  const [metaDrafts, setMetaDrafts] = useState({});
+  const [errors, setErrors] = useState({});
+  const eligible = state.quotations.filter((quotation) =>
+    (quotation.invitedMerchantIds || []).includes(merchantId) ||
+    (quotation.matchedMerchants || []).includes(merchant?.name)
+  );
+  const getDraft = (q, line) => drafts[`${q.id}:${line.id}`] || {
+    supplyStatus: "CAN_SUPPLY",
+    variation: "",
+    unitPrice: "",
+    sourcingTime: "",
+  };
+  const setDraft = (q, line, patch) => setDrafts((prev) => ({
+    ...prev,
+    [`${q.id}:${line.id}`]: { ...getDraft(q, line), ...patch },
+  }));
+  const send = (q) => {
+    const items = q.items.map((line) => ({
+      lineId: line.id,
+      name: line.name,
+      quantity: Number(line.quantity),
+      unit: line.unit,
+      specs: line.specs || "",
+      ...getDraft(q, line),
+    }));
+    const meta = metaDrafts[q.id] || {};
+    const result = submitMerchantQuote({
+      quotationId: q.id,
+      merchantId,
+      items,
+      deliveryFee: meta.deliveryFee || 0,
+      deliveryEstimate: meta.deliveryEstimate || "",
+      deliveryMethods: meta.deliveryMethods || ["merchant_delivery", "customer_collection"],
+      notes: meta.notes || "",
+    });
+    if (!result?.ok) {
+      setErrors((prev) => ({ ...prev, [q.id]: result?.error || "Please complete every requested line." }));
+      notify(result?.error || "Please complete every requested line.", "error");
+      return;
+    }
+    setErrors((prev) => ({ ...prev, [q.id]: "" }));
+    notify(`Complete quotation submitted for ${q.id}. Valid for 48 hours.`, "success");
+  };
+  const setMeta = (qId, patch) => setMetaDrafts((prev) => ({ ...prev, [qId]: { deliveryMethods: ["merchant_delivery", "customer_collection"], ...(prev[qId] || {}), ...patch } }));
+  const remaining = (deadline) => {
+    const ms = Date.parse(deadline || 0) - Date.now();
+    if (ms <= 0) return "Expired";
+    const hours = Math.floor(ms / 3600000);
+    const minutes = Math.floor((ms % 3600000) / 60000);
+    return `${hours}h ${minutes}m remaining`;
+  };
+  if (!merchantId || !merchant) return <Panel title="Merchant quotations"><p className="text-sm text-[var(--muted)]">Sign in with a merchant demo account to view quotation requests.</p></Panel>;
+  return <div className="space-y-5">
+    <div>
+      <div className="text-xs font-bold uppercase tracking-[.16em] text-[var(--muted)]">Merchant workspace</div>
+      <h1 className="mt-1 text-3xl font-extrabold">Quotation requests</h1>
+      <p className="mt-2 text-sm text-[var(--muted)]">Every eligible merchant receives the full materials request. You must respond to every line and quote the complete quantity.</p>
+    </div>
+    {!eligible.length ? <Panel title="No quotation requests"><p className="text-sm text-[var(--muted)]">When a customer submits a request and your store meets the 60% inventory-coverage threshold, it will appear here.</p></Panel> : eligible.map((q) => {
+      const submitted = state.merchantQuotes.find((x) => x.quotationId === q.id && x.merchantId === merchantId);
+      const expired = Date.parse(q.merchantResponseDeadlineAt || 0) <= Date.now();
+      const selected = q.selectedMerchantQuoteId && submitted?.id === q.selectedMerchantQuoteId;
+      return <Panel key={q.id} title={`${q.id} · ${q.name}`}>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap gap-2 text-xs text-[var(--muted)]">
+            <span>{q.items.length} requested materials</span><span>·</span>
+            <span>{q.deliveryLocation || "Delivery location not specified"}</span>
+            <span>·</span><span>{q.neededBy || "No required date"}</span>
+          </div>
+          <span className={`rounded-full px-3 py-1 text-xs font-bold ${expired ? "bg-red-50 text-red-700" : "bg-amber-50 text-amber-800"}`}>
+            {expired ? "Response window expired" : `24-hour deadline · ${remaining(q.merchantResponseDeadlineAt)}`}
+          </span>
+        </div>
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[var(--soft)] p-3 text-xs">
+          <span><b>Customer request:</b> {q.items.length} lines · full-order quotation required</span>
+          <a className="rounded-lg border border-[var(--line)] bg-[var(--surface)] px-3 py-2 font-bold" href={`/merchant/messages?quotation=${q.id}&customer=1`}>Open in-app chat</a>
+        </div>
+        {q.items.map((line) => {
+          const d = getDraft(q, line);
+          return <div key={line.id} className="mb-3 rounded-xl border border-[var(--line)] p-3">
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div><b>{line.name}</b><p className="text-xs text-[var(--muted)]">{line.quantity} {line.unit} requested</p></div>
+              <span className="rounded-full bg-[var(--soft)] px-2 py-1 text-[11px]">Customer requirement · Read only</span>
+            </div>
+            {line.specs && <p className="mt-2 rounded-lg bg-[var(--soft)] p-2 text-xs">{line.specs}</p>}
+            <fieldset className="mt-3">
+              <legend className="text-xs font-bold text-[var(--muted)]">Your response for this material</legend>
+              <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                {[
+                  ["CAN_SUPPLY", "Can be supplied", "I have the requested quantity in stock."],
+                  ["CAN_SOURCE", "Can be sourced", "I will obtain the full quantity."],
+                  ["CANNOT_SOURCE", "Cannot be sourced", "I cannot obtain this material."],
+                ].map(([value, label, hint]) => (
+                  <label key={value} className={`cursor-pointer rounded-xl border p-3 ${d.supplyStatus === value ? "border-[var(--red)] bg-[var(--blush)]" : "border-[var(--line)]"}`}>
+                    <span className="flex items-center gap-2 text-xs font-bold"><input type="radio" name={`${q.id}-${line.id}`} checked={d.supplyStatus === value} disabled={expired} onChange={() => setDraft(q, line, { supplyStatus: value })} />{label}</span>
+                    <span className="mt-1 block text-[11px] text-[var(--muted)]">{hint}</span>
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            {d.supplyStatus !== "CANNOT_SOURCE" && <div className="mt-3 grid gap-2 sm:grid-cols-2">
+              <label className="text-xs font-semibold">Exact variation / brand / grade
+                <input disabled={expired} className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] p-2 text-sm" value={d.variation} onChange={(e) => setDraft(q, line, { variation: e.target.value })} placeholder="e.g. Dangote 42.5R, 50kg" />
+              </label>
+              <label className="text-xs font-semibold">Unit price (₦)
+                <input disabled={expired} type="number" min="1" className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] p-2 text-sm" value={d.unitPrice} onChange={(e) => setDraft(q, line, { unitPrice: e.target.value })} placeholder="Enter final unit price" />
+              </label>
+              {d.supplyStatus === "CAN_SOURCE" && <label className="text-xs font-semibold sm:col-span-2">Estimated sourcing time
+                <input disabled={expired} className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] p-2 text-sm" value={d.sourcingTime} onChange={(e) => setDraft(q, line, { sourcingTime: e.target.value })} placeholder="e.g. 2–3 days" />
+              </label>}
+              <p className="text-xs text-[var(--muted)] sm:col-span-2">Full requested quantity: <b>{line.quantity} {line.unit}</b>. Partial quantities are not accepted.</p>
+            </div>}
+            {d.supplyStatus === "CANNOT_SOURCE" && <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-900">This response means you cannot provide a complete quotation. WakaStore will not split this customer's order across other merchants.</p>}
+          </div>;
+        })}
+        <div className="mt-4 rounded-xl border border-[var(--line)] p-3">
+          <h3 className="text-sm font-bold">Delivery and quotation details</h3>
+          <div className="mt-2 grid gap-2 sm:grid-cols-3">
+            <label className="text-xs font-semibold">Delivery fee (₦)
+              <input disabled={expired} type="number" min="0" className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] p-2 text-sm" value={(metaDrafts[q.id] || {}).deliveryFee ?? submitted?.deliveryFee ?? ""} onChange={(e) => setMeta(q.id, { deliveryFee: e.target.value })} placeholder="0" />
+            </label>
+            <label className="text-xs font-semibold">Estimated fulfilment time
+              <input disabled={expired} className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] p-2 text-sm" value={(metaDrafts[q.id] || {}).deliveryEstimate ?? submitted?.deliveryEstimate ?? ""} onChange={(e) => setMeta(q.id, { deliveryEstimate: e.target.value })} placeholder="e.g. 2–3 days" />
+            </label>
+            <label className="text-xs font-semibold">Quotation notes
+              <input disabled={expired} className="mt-1 w-full rounded-lg border border-[var(--line)] bg-[var(--surface)] p-2 text-sm" value={(metaDrafts[q.id] || {}).notes ?? submitted?.notes ?? ""} onChange={(e) => setMeta(q.id, { notes: e.target.value })} placeholder="Optional terms" />
+            </label>
+          </div>
+          <p className="mt-2 text-xs text-[var(--muted)]">Your submitted quotation remains valid for 48 hours. The customer will compare complete offers.</p>
+        </div>
+        {errors[q.id] && <p role="alert" className="mt-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{errors[q.id]}</p>}
+        {selected && <div className="mt-3 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-900"><b>The customer selected your quotation.</b><p className="mt-1 text-xs">Confirm that you can honour the complete order and the quoted prices.</p><button className="mt-2 rounded-xl bg-[var(--red)] px-4 py-2 text-sm font-bold text-white" onClick={() => confirmMerchantQuotation(q.id, merchantId)}>Confirm complete order</button></div>}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+          <span className="text-xs text-[var(--muted)]">{submitted ? `Submitted ${new Date(submitted.submittedAt).toLocaleString()} · valid until ${new Date(submitted.validUntil).toLocaleString()}` : "Not yet submitted"}</span>
+          <button disabled={expired || Boolean(q.selectedMerchantQuoteId) || q.status === "Paid — funds pending acceptance"} className="rounded-xl bg-[var(--red)] px-4 py-2.5 text-sm font-bold text-white disabled:cursor-not-allowed disabled:opacity-40" onClick={() => send(q)}>{submitted ? "Update quotation" : "Submit complete quotation"}</button>
+        </div>
+      </Panel>;
+    })}
+  </div>;
+}
+
 export function MerchantProducts() {
   const { state, addProduct, updateProduct, deleteProduct, notify } = useAppState();
   const [editingId, setEditingId] = useState(null);
@@ -402,6 +553,7 @@ export function MerchantProducts() {
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-extrabold">My products</h1>
+      <BulkInventoryUpload />
       <div className="grid gap-6 lg:grid-cols-[0.9fr_1.1fr]">
         <form
           onSubmit={handleSubmit}
@@ -560,47 +712,52 @@ export function MerchantOrders() {
 }
 
 export function MerchantSettlements() {
+  const { state, updateState } = useAppState();
+  const [amount, setAmount] = useState("");
+  const [msg, setMsg] = useState("");
+  const merchantId = merchantIdOf(state);
+  const mine = (state.orders || []).map((o) => ({ o, a: moneyByMerchant(o).find((x) => x.merchantId === merchantId) })).filter((r) => r.a);
+  const sum = (pick) => mine.reduce((n, r) => n + pick(r.a), 0);
+  const settledNet = sum((a) => a.settled.merchantShare);
+  const commission = sum((a) => a.settled.commission + a.pending.commission);
+  const pending = sum((a) => a.pending.merchantShare);
+  const held = sum((a) => a.held.gross);
+  const refunded = sum((a) => a.refunded);
+  const withdrawals = (state.withdrawals || []).filter((w) => w.merchantId === merchantId);
+  const withdrawn = withdrawals.reduce((n, w) => n + w.amount, 0);
+  const available = Math.max(0, settledNet - withdrawn);
+  const withdraw = () => {
+    const value = Math.round(Number(amount));
+    if (!(value > 0)) return setMsg("Enter an amount greater than zero.");
+    if (value > available) return setMsg("That is more than your available balance. Only accepted or admin-released orders can be withdrawn.");
+    updateState((prev) => ({ ...prev, withdrawals: [{ id: `WD-${Date.now()}`, merchantId, amount: value, status: "Requested (simulated)", at: new Date().toLocaleString("en-NG") }, ...(prev.withdrawals || [])] }));
+    setAmount(""); setMsg("Withdrawal requested. In production the payment provider pays this out.");
+  };
   return (
     <div className="space-y-5">
       <h1 className="text-3xl font-extrabold">Settlements</h1>
-      <div className="grid gap-4 md:grid-cols-3">
-        <Metric
-          label="Pending"
-          value={formatNaira(265000)}
-          note="Awaiting payout"
-          Icon={CircleDollarSign}
-        />
-        <Metric
-          label="Completed"
-          value={formatNaira(1340000)}
-          note="Last 30 days"
-          Icon={CheckCircle2}
-        />
-        <Metric
-          label="Refunds"
-          value={formatNaira(12000)}
-          note="Demo settlement records"
-          Icon={FileWarning}
-        />
+      <p className="text-sm text-[var(--muted)]">Simulation. You receive materials value minus WakaStore's commission, plus delivery charges. Money becomes Available only after the customer accepts the complete delivery, or an admin authorises release.</p>
+      <div className="grid gap-4 md:grid-cols-4">
+        <Metric label="Pending" value={formatNaira(pending)} note="Awaiting customer acceptance" Icon={CircleDollarSign} />
+        <Metric label="Available" value={formatNaira(available)} note="Accepted, ready to withdraw" Icon={CheckCircle2} />
+        <Metric label="On hold" value={formatNaira(held)} note="Open dispute on these items" Icon={FileWarning} />
+        <Metric label="Commission" value={formatNaira(commission)} note={`On materials only. Refunds: ${formatNaira(refunded)}`} Icon={CreditCard} />
       </div>
-      <Panel title="Settlement history">
-        <div className="space-y-3 text-sm text-[var(--muted)]">
-          {[
-            "Settlement 2026-10-18",
-            "Settlement 2026-09-18",
-            "Settlement 2026-08-20",
-          ].map((entry, index) => (
-            <div
-              key={entry}
-              className="flex items-center justify-between rounded-xl bg-[var(--soft)] px-3 py-2.5"
-            >
-              <span>{entry}</span>
-              <strong className="text-[var(--ink)]">
-                {formatNaira([320000, 280000, 410000][index])}
-              </strong>
-            </div>
-          ))}
+      <Panel title="Withdraw">
+        <div className="flex flex-wrap items-center gap-2">
+          <input value={amount} onChange={(e) => { setAmount(e.target.value); setMsg(""); }} inputMode="numeric" placeholder="Amount (₦)" className="w-44 rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-sm" />
+          <button onClick={withdraw} className="rounded-xl bg-[var(--red)] px-4 py-2.5 text-sm font-bold text-white">Request withdrawal</button>
+          <span className="text-xs text-[var(--muted)]">Available: {formatNaira(available)}</span>
         </div>
+        {msg && <p className="mt-2 text-sm font-bold">{msg}</p>}
+        {withdrawals.length > 0 && <div className="mt-3 space-y-2 text-sm">{withdrawals.map((w) => <div key={w.id} className="flex justify-between rounded-xl bg-[var(--soft)] px-3 py-2"><span>{w.id} · {w.at}</span><span><b>{formatNaira(w.amount)}</b> · {w.status}</span></div>)}</div>}
+      </Panel>
+      <Panel title="Order settlement history">
+        {mine.length ? <div className="space-y-2 text-sm">{mine.map(({ o, a }) => (
+          <div key={o.id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-[var(--soft)] px-3 py-2.5">
+            <b>{o.id}</b>
+            <span className="text-[var(--muted)]">{a.settled.merchantShare ? `settled ${formatNaira(a.settled.merchantShare)}` : `pending ${formatNaira(a.pending.merchantShare)}${a.underReview ? " (admin review)" : ""}`}{a.held.gross ? ` · on hold ${formatNaira(a.held.gross)}` : ""} · commission {formatNaira(a.settled.commission + a.pending.commission)}</span>
+          </div>))}</div> : <p className="text-sm text-[var(--muted)]">No settlements yet. They appear once a customer pays for an order assigned to you.</p>}
       </Panel>
     </div>
   );
@@ -610,6 +767,7 @@ export function MerchantAccount() {
   return (
     <div className="space-y-5">
       <h1 className="text-3xl font-extrabold">Business profile</h1>
+      <MerchantDocuments />
       <div className="grid gap-5 lg:grid-cols-2">
         <Panel title="Profile details">
           <div className="space-y-3 text-sm">
@@ -668,18 +826,47 @@ export function MerchantInventory() {
 export function MerchantFulfillment() {
   const { state, updateSubOrderStatus } = useAppState();
   const merchantId = merchantIdOf(state);
-  const assigned = state.orders.flatMap((o)=> (o.subOrders||[]).filter((s)=>s.merchantId===merchantId && !["Rejected","Reassigned"].includes(s.status)).map((s)=>({ ...s, orderId:o.id, customer:o.customer || "WakaStore customer", address:o.deliveryAddress || {} })));
-  const actions = { Pending:["Accepted","Accept order"], Accepted:["Packed","Mark packed"], Packed:["Dispatched","Dispatch order"], Dispatched:["Delivered","Mark delivered"] };
-  return <div className="space-y-5"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-[var(--muted)]">Pick, pack and dispatch</p><h1 className="mt-1 text-3xl font-extrabold">Fulfillment</h1><p className="mt-2 text-sm text-[var(--muted)]">Move orders through each fulfilment stage and keep customer tracking current.</p></div>{!assigned.length?<Panel title="No orders to fulfil"><p className="text-sm text-[var(--muted)]">New customer orders assigned to your store will appear here.</p></Panel>:assigned.map((s)=><Panel key={`${s.orderId}-${s.merchantId}`} title={s.orderId} action={<span className="rounded-full bg-[var(--blush)] px-3 py-1 text-xs font-bold text-[var(--red)]">{s.status}</span>}><div className="space-y-2 text-sm">{s.items.map((it,i)=><div key={i} className="flex justify-between gap-3"><span>{it.quantity} × {it.name}</span><b>{formatNaira(it.lineTotal || it.price*it.quantity)}</b></div>)}</div><div className="mt-4 flex flex-wrap gap-2">{actions[s.status] && <button onClick={()=>updateSubOrderStatus(s.orderId,merchantId,actions[s.status][0])} className="rounded-xl bg-[var(--red)] px-4 py-2.5 text-sm font-bold text-white">{actions[s.status][1]}</button>}{s.status==="Pending" && <button onClick={()=>updateSubOrderStatus(s.orderId,merchantId,"Rejected")} className="rounded-xl bg-[var(--soft)] px-4 py-2.5 text-sm font-bold">Reject & reroute</button>}</div></Panel>)}</div>;
+  const assigned = state.orders.flatMap((o)=> (o.subOrders||[]).filter((s)=>s.merchantId===merchantId && !["Rejected","Reassigned"].includes(s.status)).map((s)=>({ ...s, orderId:o.id, customer:o.customer || "WakaStore customer", address:o.deliveryAddress || {}, fullOrderRequired:Boolean(o.fullOrderRequired), deliveryMethod:o.deliveryMethod || "merchant_delivery" })));
+  const actionsFor = (order) => order.deliveryMethod === "customer_collection"
+    ? { Pending:["Accepted","Accept order"], Accepted:["Packed","Mark packed"], Packed:["Ready for collection","Mark ready for pickup"], "Ready for collection":["Delivered","Confirm customer collection"] }[order.status]
+    : { Pending:["Accepted","Accept order"], Accepted:["Packed","Mark packed"], Packed:["Dispatched","Dispatch order"], Dispatched:["Delivered","Mark delivered"] }[order.status];
+  return <div className="space-y-5"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-[var(--muted)]">Pick, pack and dispatch</p><h1 className="mt-1 text-3xl font-extrabold">Fulfillment</h1><p className="mt-2 text-sm text-[var(--muted)]">Move orders through each fulfilment stage and keep customer tracking current.</p></div>{!assigned.length?<Panel title="No orders to fulfil"><p className="text-sm text-[var(--muted)]">New customer orders assigned to your store will appear here.</p></Panel>:assigned.map((s)=><Panel key={`${s.orderId}-${s.merchantId}`} title={s.orderId} action={<span className="rounded-full bg-[var(--blush)] px-3 py-1 text-xs font-bold text-[var(--red)]">{s.status}</span>}><div className="space-y-2 text-sm">{s.items.map((it,i)=><div key={i} className="flex justify-between gap-3"><span>{it.quantity} × {it.name}</span><b>{formatNaira(it.lineTotal || it.price*it.quantity)}</b></div>)}</div><div className="mt-4 flex flex-wrap gap-2">{actionsFor(s) && ["Pending","Accepted"].includes(s.status) && <button onClick={()=>updateSubOrderStatus(s.orderId,merchantId,actionsFor(s)[0])} className="rounded-xl bg-[var(--red)] px-4 py-2.5 text-sm font-bold text-white">{actionsFor(s)[1]}</button>}{s.status==="Pending" && !s.fullOrderRequired && <button onClick={()=>updateSubOrderStatus(s.orderId,merchantId,"Rejected")} className="rounded-xl bg-[var(--soft)] px-4 py-2.5 text-sm font-bold">Reject & reroute</button>}{s.fullOrderRequired && <p className="mt-2 text-xs text-[var(--muted)]">Complete-list order: you are responsible for every material. If you cannot fulfil the complete order, contact WakaStore Admin; this order will not be split across other merchants.</p>}</div><DispatchProofPanel order={state.orders.find((o)=>o.id===s.orderId)} sub={s} merchantId={merchantId} /><DeliveryRecordCard order={state.orders.find((o)=>o.id===s.orderId)} audience="merchant" /></Panel>)}</div>;
 }
 
 export function MerchantEarnings() {
   const { state } = useAppState();
   const merchantId = merchantIdOf(state);
-  const rows = state.orders.flatMap((o)=>(o.subOrders||[]).filter((s)=>s.merchantId===merchantId).map((s)=>({order:o.id,status:s.status,amount:(s.items||[]).reduce((n,i)=>n+Number(i.lineTotal || i.price*i.quantity || 0),0)})));
-  const gross = rows.filter((r)=>["Delivered","Completed"].includes(r.status)).reduce((n,r)=>n+r.amount,0);
-  const fee = Math.round(gross * Number(state.settings?.feeRate ?? 0.025));
-  return <div className="space-y-5"><div><p className="text-xs font-bold uppercase tracking-[.16em] text-[var(--muted)]">Merchant performance</p><h1 className="mt-1 text-3xl font-extrabold">Earnings</h1><p className="mt-2 text-sm text-[var(--muted)]">Demo settlement estimate. No real payouts are initiated.</p></div><div className="grid gap-3 sm:grid-cols-3"><Metric label="Delivered sales" value={formatNaira(gross)} note="Completed fulfilment" Icon={CircleDollarSign}/><Metric label="Platform fee" value={formatNaira(fee)} note={`${(Number(state.settings?.feeRate ?? 0.025)*100).toFixed(1)}% demo fee`} Icon={CreditCard}/><Metric label="Estimated earnings" value={formatNaira(Math.max(0,gross-fee))} note="Before payout" Icon={WalletCards}/></div><Panel title="Order earnings">{rows.length?rows.map((r,i)=><div key={`${r.order}-${i}`} className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--line)] py-3 text-sm last:border-0"><div><b>{r.order}</b><p className="text-xs text-[var(--muted)]">{r.status}</p></div><b>{formatNaira(r.amount)}</b></div>):<p className="text-sm text-[var(--muted)]">Earnings will appear as orders are completed.</p>}</Panel></div>;
+  const rows = state.orders.flatMap((order) => (order.subOrders || [])
+    .filter((sub) => sub.merchantId === merchantId)
+    .map((sub) => {
+      if (order.fullOrderRequired) {
+        return {
+          order: order.id,
+          status: order.settlementStatus === "SETTLED" ? "Completed" : "Pending settlement",
+          amount: Number(order.merchantProceeds || 0),
+          commission: Number(order.platformCommission || 0),
+          pending: order.settlementStatus !== "SETTLED",
+        };
+      }
+      const amount = (sub.items || []).reduce((n, item) => n + Number(item.lineTotal || item.price * item.quantity || 0), 0);
+      return {
+        order: order.id,
+        status: sub.status,
+        amount: ["Delivered", "Completed"].includes(sub.status) ? amount * 0.975 : 0,
+        commission: ["Delivered", "Completed"].includes(sub.status) ? amount * 0.025 : 0,
+        pending: !["Delivered", "Completed"].includes(sub.status),
+      };
+    }));
+  const settled = rows.filter((row) => !row.pending);
+  const pending = rows.filter((row) => row.pending);
+  const gross = settled.reduce((n, row) => n + row.amount, 0);
+  const pendingBalance = pending.reduce((n, row) => n + row.amount, 0);
+  const fee = settled.reduce((n, row) => n + row.commission, 0);
+  return <div className="space-y-5">
+    <div><p className="text-xs font-bold uppercase tracking-[.16em] text-[var(--muted)]">Merchant performance</p><h1 className="mt-1 text-3xl font-extrabold">Earnings</h1><p className="mt-2 text-sm text-[var(--muted)]">Quotation-order proceeds remain pending until complete delivery and customer acceptance or admin resolution.</p></div>
+    <div className="grid gap-3 sm:grid-cols-3"><Metric label="Settled proceeds" value={formatNaira(gross)} note="After commission" Icon={CircleDollarSign}/><Metric label="Pending settlement" value={formatNaira(pendingBalance)} note="Not withdrawable yet" Icon={WalletCards}/><Metric label="WakaStore commission" value={formatNaira(fee)} note="5% of accepted materials only for quotation orders" Icon={CreditCard}/></div>
+    <Panel title="Order earnings">{rows.length ? rows.map((row, i) => <div key={`${row.order}-${i}`} className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--line)] py-3 text-sm last:border-0"><div><b>{row.order}</b><p className="text-xs text-[var(--muted)]">{row.status}</p></div><b>{formatNaira(row.amount)}</b></div>) : <p className="text-sm text-[var(--muted)]">Earnings will appear as orders are completed.</p>}</Panel>
+  </div>;
 }
 
 export function AdminDashboard() {
@@ -843,6 +1030,7 @@ export function AdminMerchants() {
               <button type="button" onClick={() => setSelected(merchant)} className="rounded-lg bg-[var(--soft)] px-3 py-1.5 text-xs font-bold">Review details</button>
               <button type="button" onClick={() => { const reason = window.prompt(`Reason for removing ${merchant.name}?`, "Policy or verification failure"); if (reason?.trim() && window.confirm(`Permanently remove ${merchant.name} from this demo marketplace?`)) removeMerchant(merchant.id, reason.trim()); }} className="rounded-lg bg-[var(--blush)] px-3 py-1.5 text-xs font-bold text-[var(--red)]">Remove merchant</button>
             </div>
+            <MerchantDocumentReview merchant={merchant} />
           </div>
         ))}
         {!merchants.length && <div className="rounded-[22px] border border-dashed border-[var(--line)] p-8 text-center text-sm text-[var(--muted)]">No merchant applications match these filters.</div>}
@@ -936,43 +1124,56 @@ export function AdminProducts() {
 }
 
 export function AdminOrders() {
-  const { state } = useAppState();
+  const { state, adminResolveQuotationAcceptance, notify } = useAppState();
+  const pendingAcceptance = state.orders.filter((order) =>
+    order.fullOrderRequired &&
+    order.customerAcceptanceStatus === "AWAITING_DELIVERY" &&
+    (order.subOrders || []).some((sub) => sub.status === "Delivered")
+  );
+  const resolve = (order, outcome) => {
+    const note = window.prompt(
+      outcome === "release"
+        ? `Record why delivery evidence supports settlement for ${order.id}:`
+        : `Record the investigation note for ${order.id}:`,
+      outcome === "release" ? "Complete delivery verified with customer." : "Contacting customer and reviewing delivery evidence."
+    );
+    if (!note?.trim()) return;
+    const ok = adminResolveQuotationAcceptance(order.id, outcome, note.trim());
+    notify(ok ? (outcome === "release" ? "Settlement released after admin review." : "Order moved to admin investigation.") : "Could not update this order.", ok ? "success" : "error");
+  };
   return (
     <div className="space-y-5">
-      <h1 className="text-3xl font-extrabold">Parent orders</h1>
-      <div className="space-y-3">
-        {state.orders.map((order) => (
-          <div
-            key={order.id}
-            className="rounded-[22px] border border-[var(--line)] bg-[var(--surface)] p-4"
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="font-extrabold text-lg">{order.id}</div>
-                <div className="text-sm text-[var(--muted)]">
-                  {order.date} · {order.merchants} merchants
-                </div>
+      <div><h1 className="text-3xl font-extrabold">Orders & settlement review</h1><p className="mt-1 text-sm text-[var(--muted)]">Monitor fulfilment and review delivered quotation orders awaiting customer acceptance.</p></div>
+      <Panel title={`Admin intervention · ${pendingAcceptance.length} awaiting review`}>
+        {!pendingAcceptance.length ? <p className="text-sm text-[var(--muted)]">No delivered quotation orders are currently waiting for customer acceptance.</p> : <div className="space-y-3">
+          {pendingAcceptance.map((order) => <div key={order.id} className="rounded-xl border border-amber-200 bg-amber-50/60 p-3">
+            <div className="flex flex-wrap items-center justify-between gap-2"><b>{order.id} · {order.merchantName}</b><span className="rounded-full bg-amber-100 px-2 py-1 text-[10px] font-bold text-amber-900">{order.adminReviewStatus === "UNDER_REVIEW" ? "Under investigation" : "Customer not yet accepted"}</span></div>
+            <p className="mt-1 text-xs text-[var(--muted)]">Customer: {order.customerEmail || "Not recorded"} · Payment: {formatNaira(order.total)} · Materials: {formatNaira(order.subtotal)}</p>
+            <p className="mt-2 text-xs text-[var(--muted)]">Merchant marked the complete order delivered. Funds remain pending until the customer accepts or an administrator reviews the evidence.</p>
+            <div className="mt-3"><DeliveryRecordCard order={order} audience="admin" /></div>
+            {order.adminReviewNote && <p className="mt-2 rounded-lg bg-[var(--surface)] p-2 text-xs">Latest admin note: {order.adminReviewNote}</p>}
+            <div className="mt-3 flex flex-wrap gap-2">
+              <button onClick={() => resolve(order, "investigate")} className="rounded-lg bg-[var(--surface)] px-3 py-2 text-xs font-bold">Record investigation</button>
+              <button onClick={() => resolve(order, "release")} className="rounded-lg bg-[var(--red)] px-3 py-2 text-xs font-bold text-white">Verify delivery & release settlement</button>
+            </div>
+          </div>)}
+        </div>}
+      </Panel>
+      <Panel title="All parent orders">
+        <div className="space-y-3">
+          {state.orders.map((order) => (
+            <div key={order.id} className="rounded-xl border border-[var(--line)] p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div><div className="font-extrabold text-lg">{order.id}</div><div className="text-sm text-[var(--muted)]">{order.date} · {order.merchantName || `${order.merchants || 1} merchant(s)`}</div></div>
+                <span className="rounded-full bg-[var(--blush)] px-2.5 py-1 text-[10px] font-bold uppercase text-[var(--red)]">{order.status}</span>
               </div>
-              <span className="rounded-full bg-[var(--blush)] px-2.5 py-1 text-[10px] font-bold uppercase text-[var(--red)]">
-                {order.status}
-              </span>
+              <div className="mt-2 flex flex-wrap gap-3 text-xs text-[var(--muted)]"><span>Payment: {order.paymentStatus || order.paymentMethod || "—"}</span><span>Settlement: {order.settlementStatus || "Standard order"}</span><span>Total: {formatNaira(order.total || 0)}</span></div>
+              {(order.subOrders || []).map((sub) => <div key={sub.merchantId} className="mt-2 rounded-lg bg-[var(--soft)] p-3 text-sm"><b>{sub.merchantName}</b><div className="mt-1 text-xs text-[var(--muted)]">{sub.status}</div></div>)}
             </div>
-            <div className="mt-3 space-y-2">
-              {order.subOrders?.map((sub) => (
-                <div
-                  key={sub.merchantId}
-                  className="rounded-xl bg-[var(--soft)] p-3 text-sm"
-                >
-                  <div className="font-bold text-[var(--ink)]">
-                    {sub.merchantName}
-                  </div>
-                  <div className="mt-1 text-[var(--muted)]">{sub.status}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ))}
-      </div>
+          ))}
+          {!state.orders.length && <p className="text-sm text-[var(--muted)]">No orders yet.</p>}
+        </div>
+      </Panel>
     </div>
   );
 }

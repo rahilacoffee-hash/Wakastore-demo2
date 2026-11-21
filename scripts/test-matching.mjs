@@ -43,8 +43,8 @@ console.log('unmatched by everyone:', m.needsSourcing.map(l => l.name))
 const basket = bestBasket(m)
 console.log('best basket groups:', groupSelectionByMerchant(basket).map(g => `${g.merchantName}: ${g.items.length} lines ₦${g.subtotal}`))
 const pass = m.results.find(r=>r.merchant.id==='A').percentage===80
-  && m.results.find(r=>r.merchant.id==='B').percentage===60
+  && m.results.find(r=>r.merchant.id==='B').percentage===70
   && m.results.find(r=>r.merchant.id==='C').percentage===40
   && m.eligible.length===2 && !m.results.some(r=>r.merchant.id==='D')
-console.log(pass ? 'PASS: 80 / 60 / 40, C excluded, suspended D ignored' : 'FAIL')
+console.log(pass ? 'PASS: 80 / 70 / 40, out-of-stock inventory counts for eligibility, suspended D ignored' : 'FAIL')
 process.exit(pass?0:1)

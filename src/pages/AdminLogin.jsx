@@ -11,7 +11,8 @@ const ADMIN_ACCOUNTS = [
 ];
 
 export default function AdminLogin() {
-  const { state, signIn } = useAppState();
+  const { state, signIn, updateState } = useAppState();
+  const [pendingAdmin, setPendingAdmin] = useState(null); // created admin who must replace the temporary password
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -20,7 +21,10 @@ export default function AdminLogin() {
   const [busy, setBusy] = useState(false);
 
   if (["admin", "super-admin"].includes(state?.session?.role)) {
-    return <Navigate to="/admin/overview" replace />;
+    return <Navigate to={state.session.role === "super-admin" ? "/super-admin/overview" : "/admin/overview"} replace />;
+  }
+  if (pendingAdmin) {
+    return <ChangeTemporaryPassword admin={pendingAdmin} onDone={(a) => { updateState((prev) => ({ ...prev, adminUsers: prev.adminUsers.map((x) => (x.id === a.id ? { ...x, password: a.password, mustChange: false } : x)) })); signIn("admin", a.email, a.name); navigate("/admin/overview", { replace: true }); }} />;
   }
 
   const submit = (event) => {
@@ -31,13 +35,23 @@ export default function AdminLogin() {
     const account = ADMIN_ACCOUNTS.find(
       (item) => item.email === normalizedEmail && item.password === password,
     );
+    const created = (state.adminUsers || []).find((u) => u.email === normalizedEmail && u.password === password);
+    if (created) {
+      setBusy(false);
+      if (created.status !== "active") { setError("This administrator account is suspended. Contact the Super Admin."); return; }
+      if (created.mustChange) { setPendingAdmin(created); return; }
+      signIn("admin", created.email, created.name);
+      navigate("/admin/overview", { replace: true });
+      return;
+    }
     if (!account) {
+      updateState((prev) => ({ ...prev, auditLogs: [{ id: `audit-${Date.now()}`, actor: normalizedEmail || "unknown", action: "Failed admin login", entity: "admin login", date: new Date().toLocaleString("en-NG"), details: "Incorrect email or password." }, ...prev.auditLogs] }));
       setBusy(false);
       setError("The email or password is incorrect, or this account is not an administrator.");
       return;
     }
     signIn(account.role, account.email, account.name);
-    navigate("/admin/overview", { replace: true });
+    navigate(account.role === "super-admin" ? "/super-admin/overview" : "/admin/overview", { replace: true });
   };
 
   return (
@@ -73,6 +87,31 @@ export default function AdminLogin() {
         </section>
         <p className="mt-5 text-center text-xs text-[var(--muted)]">Need a customer or merchant account? <Link to="/welcome" className="font-bold text-[var(--red)]">Return to account options</Link></p>
       </div>
+    </main>
+  );
+}
+
+function ChangeTemporaryPassword({ admin, onDone }) {
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [error, setError] = useState("");
+  const submit = (e) => {
+    e.preventDefault();
+    if (next.length < 8) return setError("Use at least 8 characters.");
+    if (next === admin.password) return setError("Choose a password different from the temporary one.");
+    if (next !== confirm) return setError("The two passwords do not match.");
+    onDone({ ...admin, password: next });
+  };
+  return (
+    <main className="min-h-[100svh] bg-[var(--canvas)] px-4 py-8 text-[var(--ink)] sm:grid sm:place-items-center sm:px-6">
+      <form onSubmit={submit} className="mx-auto w-full max-w-[460px] space-y-3 rounded-3xl border border-[var(--line)] bg-[var(--surface)] p-6">
+        <h1 className="text-2xl font-extrabold">Set a new password</h1>
+        <p className="text-sm text-[var(--muted)]">Hello {admin.name}. Your account uses a temporary password. Choose your own to continue.</p>
+        <input type="password" autoComplete="new-password" className="w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-sm" placeholder="New password" value={next} onChange={(e) => { setNext(e.target.value); setError(""); }} />
+        <input type="password" autoComplete="new-password" className="w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-sm" placeholder="Confirm new password" value={confirm} onChange={(e) => { setConfirm(e.target.value); setError(""); }} />
+        {error && <p role="alert" className="text-sm font-bold text-[var(--red)]">{error}</p>}
+        <button className="w-full rounded-xl bg-[var(--red)] px-4 py-2.5 text-sm font-bold text-white">Save password and continue</button>
+      </form>
     </main>
   );
 }

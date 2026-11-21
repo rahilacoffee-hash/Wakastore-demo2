@@ -27,7 +27,7 @@ r = E.checkout(s, { customerId: 'c-1', groups, paymentMethod: 'wallet', address:
 const total = s.orders[0].total
 t('wallet checkout ok: one parent order', r.ok && s.orders.length === 1)
 t('sub-orders = merchants', s.subOrders.length === groups.length)
-t('fee = 2.5% of subtotal', s.orders[0].fee === Math.round(s.orders[0].subtotal * 0.025))
+t('commission = 5% of materials, never added to the customer total', s.orders[0].fee === Math.round(s.orders[0].subtotal * 0.05) && s.orders[0].total === s.orders[0].subtotal)
 t('wallet debited exactly once', E.walletBalance(s, 'c-1') === before - total)
 r = E.checkout(s, { customerId: 'c-1', groups, paymentMethod: 'wallet', address: addr, quotationId: q.id, idempotencyKey: key }); s = r.state
 t('double submit: no duplicate order or debit', s.orders.length === 1 && E.walletBalance(s, 'c-1') === before - total)

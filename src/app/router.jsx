@@ -1,5 +1,8 @@
 import { Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "framer-motion";
+import { AdminCategories, AdminQuotations, AdminPayments, AdminSettlements, AdminReports, AdminNotificationLog } from "../pages/AdminPages";
+import { SuperOverview, AdminTeam, PlatformSettings } from "../pages/SuperAdminPages";
+import SmartFixerImport from "../pages/client/SmartFixer";
 import AppShell from "../layouts/Appshell";
 import AppLayout from "../layouts/AppLayout";
 import Home from "../pages/client/Home/Home";
@@ -26,6 +29,7 @@ import {
   MerchantDashboard,
   MerchantProducts,
   MerchantOrders,
+  MerchantQuotationRequests,
   MerchantInventory,
   MerchantFulfillment,
   MerchantEarnings,
@@ -48,6 +52,7 @@ import {
   NewQuotationFlow,
   QuotationDetail,
 } from "../pages/client/QuotationFlow";
+import ChatPage from "../pages/client/ChatPage";
 import StartScreen from "../screen/StartScreen";
 import LoadingScreen from "../screen/LoadingScreen";
 import AdminLogin from "../pages/AdminLogin";
@@ -197,6 +202,15 @@ export default function AppRouter() {
               </Screen>
             }
           />
+          <Route path="/client/messages" element={<Screen><ChatPage /></Screen>} />
+          <Route
+            path="/client/smartfixer"
+            element={
+              <Screen>
+                <SmartFixerImport />
+              </Screen>
+            }
+          />
           <Route
             path="/client/quotations"
             element={
@@ -276,6 +290,8 @@ export default function AppRouter() {
             </RequireRole>
           }
         />
+        <Route path="/merchant/quotations" element={<RequireRole allowedRoles={["merchant"]}><MerchantGate><AppLayout role="merchant"><Screen><MerchantQuotationRequests /></Screen></AppLayout></MerchantGate></RequireRole>} />
+        <Route path="/merchant/messages" element={<RequireRole allowedRoles={["merchant"]}><MerchantGate><AppLayout role="merchant"><Screen><ChatPage /></Screen></AppLayout></MerchantGate></RequireRole>} />
         <Route
           path="/merchant/orders"
           element={
@@ -407,10 +423,202 @@ export default function AppRouter() {
           }
         />
         <Route
+          path="/admin/categories"
+          element={
+            <RequireRole allowedRoles={["admin", "super-admin"]}>
+              <AppLayout role="admin">
+                <Screen>
+                  <AdminCategories />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/quotations"
+          element={
+            <RequireRole allowedRoles={["admin", "super-admin"]}>
+              <AppLayout role="admin">
+                <Screen>
+                  <AdminQuotations />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/payments"
+          element={
+            <RequireRole allowedRoles={["admin", "super-admin"]}>
+              <AppLayout role="admin">
+                <Screen>
+                  <AdminPayments />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/settlements"
+          element={
+            <RequireRole allowedRoles={["admin", "super-admin"]}>
+              <AppLayout role="admin">
+                <Screen>
+                  <AdminSettlements />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
           path="/admin/reports"
           element={
             <RequireRole allowedRoles={["admin", "super-admin"]}>
               <AppLayout role="admin">
+                <Screen>
+                  <AdminReports />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/notification-log"
+          element={
+            <RequireRole allowedRoles={["admin", "super-admin"]}>
+              <AppLayout role="admin">
+                <Screen>
+                  <AdminNotificationLog />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/admin/audit"
+          element={
+            <RequireRole allowedRoles={["admin", "super-admin"]}>
+              <AppLayout role="admin">
+                <Screen>
+                  <AdminAuditLogs />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/super-admin/overview"
+          element={
+            <RequireRole allowedRoles={["super-admin"]}>
+              <AppLayout role="super-admin">
+                <Screen>
+                  <SuperOverview />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/super-admin/team"
+          element={
+            <RequireRole allowedRoles={["super-admin"]}>
+              <AppLayout role="super-admin">
+                <Screen>
+                  <AdminTeam />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/super-admin/settings"
+          element={
+            <RequireRole allowedRoles={["super-admin"]}>
+              <AppLayout role="super-admin">
+                <Screen>
+                  <PlatformSettings />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/super-admin/sourcing"
+          element={
+            <RequireRole allowedRoles={["super-admin"]}>
+              <AppLayout role="super-admin">
+                <Screen>
+                  <SuperAdminSourcing />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/super-admin/payments"
+          element={
+            <RequireRole allowedRoles={["super-admin"]}>
+              <AppLayout role="super-admin">
+                <Screen>
+                  <AdminPayments />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/super-admin/settlements"
+          element={
+            <RequireRole allowedRoles={["super-admin"]}>
+              <AppLayout role="super-admin">
+                <Screen>
+                  <AdminSettlements />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/super-admin/reports"
+          element={
+            <RequireRole allowedRoles={["super-admin"]}>
+              <AppLayout role="super-admin">
+                <Screen>
+                  <AdminReports />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/super-admin/quotations"
+          element={
+            <RequireRole allowedRoles={["super-admin"]}>
+              <AppLayout role="super-admin">
+                <Screen>
+                  <AdminQuotations />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/super-admin/notification-log"
+          element={
+            <RequireRole allowedRoles={["super-admin"]}>
+              <AppLayout role="super-admin">
+                <Screen>
+                  <AdminNotificationLog />
+                </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/super-admin/audit"
+          element={
+            <RequireRole allowedRoles={["super-admin"]}>
+              <AppLayout role="super-admin">
                 <Screen>
                   <AdminAuditLogs />
                 </Screen>
@@ -426,6 +634,16 @@ export default function AppRouter() {
                 <Screen>
                   <SuperAdminSourcing />
                 </Screen>
+              </AppLayout>
+            </RequireRole>
+          }
+        />
+        <Route
+          path="/super-admin/*"
+          element={
+            <RequireRole allowedRoles={["super-admin"]}>
+              <AppLayout role="super-admin">
+                <RolePlaceholder role="admin" />
               </AppLayout>
             </RequireRole>
           }

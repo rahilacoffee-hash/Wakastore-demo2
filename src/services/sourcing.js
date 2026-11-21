@@ -26,7 +26,10 @@ export const SOURCING = Object.freeze({
 })
 
 export const FULFILMENT = Object.freeze(['PENDING', 'PREPARING', 'READY', 'DISPATCHED', 'DELIVERED', 'ACCEPTED'])
-export const COMMISSION = Object.freeze({ merchant: 95, platform: 5 }) // percent
+// Platform commission, in percent of MATERIALS (delivery excluded), deducted from the merchant. Admin-configurable.
+let platformPct = 5
+export const setCommissionPercent = (p) => { const n = Number(p); if (Number.isFinite(n) && n >= 0 && n <= 30) platformPct = n }
+export const COMMISSION = { get platform() { return platformPct }, get merchant() { return 100 - platformPct } }
 export const split = (gross) => {
   const merchantShare = Math.round((gross * COMMISSION.merchant) / 100)
   return { gross, merchantShare, commission: gross - merchantShare }
@@ -128,14 +131,15 @@ export function rebuildSubOrders(order, merchants = []) {
 export const countsAsPriced = (i) =>
   i.unitPrice != null && i.sourcingStatus !== SOURCING.UNRESOLVED && (!i.priceApproval || i.priceApproval.status === 'APPROVED')
 
-export function orderTotals(order, feeRate = 0.025) {
+// `fee` is WakaStore's commission (deducted from the merchant). It is NOT part of the customer's total.
+export function orderTotals(order, feeRate = 0.05) {
   const items = order.items || []
   const confirmedSubtotal = items.reduce((n, i) => n + (countsAsPriced(i) ? i.unitPrice * i.quantity : 0), 0)
   const pending = items.filter((i) => i.priceApproval?.status === 'PENDING')
   const pendingApprovalAmount = pending.reduce((n, i) => n + i.unitPrice * i.quantity, 0)
   const fee = Math.round(confirmedSubtotal * feeRate)
   return {
-    confirmedSubtotal, fee, deliveryFee: Number(order.deliveryFee) || 0, total: confirmedSubtotal + fee + (Number(order.deliveryFee) || 0),
+    confirmedSubtotal, fee, deliveryFee: Number(order.deliveryFee) || 0, total: confirmedSubtotal + (Number(order.deliveryFee) || 0),
     pendingApprovalAmount, pendingApprovalCount: pending.length,
     unpricedCount: items.filter((i) => i.unitPrice == null && i.sourcingStatus !== SOURCING.UNRESOLVED).length,
     unresolvedCount: items.filter((i) => i.sourcingStatus === SOURCING.UNRESOLVED).length,
@@ -253,14 +257,16 @@ export function rerouteItem(order, itemId, ctx = {}) {
   if (!item) return fail('NOT_FOUND', 'Item not found.')
   if (item.sourcingStatus !== SOURCING.REASSIGNMENT_PENDING) return fail('NOT_PENDING_REASSIGNMENT', 'This item is not waiting for reassignment (it cannot be rerouted twice).')
   const at = ctx.at || nowIso()
-  const candidates = findRerouteCandidates(item, ctx)
+  // Launch rule: ONE merchant per order. When multiMerchant is false nobody else is offered the item;
+  // it goes to admin, who can reassign the whole order or arrange an approved alternative.
+  const candidates = ctx.multiMerchant === false ? [] : findRerouteCandidates(item, ctx)
   const from = item.currentMerchantId
   if (!candidates.length) {
     return {
       ok: true, rerouted: false, candidates,
       order: patchItem(order, itemId, (it) => ({
         ...it, currentMerchantId: null, sourcingStatus: SOURCING.UNRESOLVED,
-        history: [...it.history, entry('NO_ELIGIBLE_MERCHANT', 'system', { at, from, note: 'No other eligible merchant with a relevant category and stock or sourcing capability. Awaiting admin sourcing.' })],
+        history: [...it.history, entry('NO_ELIGIBLE_MERCHANT', 'system', { at, from, note: ctx.multiMerchant === false ? 'Single-merchant order: the item is not offered to other merchants. Awaiting admin decision.' : 'No other eligible merchant with a relevant category and stock or sourcing capability. Awaiting admin sourcing.' })],
       })),
     }
   }

@@ -238,10 +238,10 @@ const up = S.upgradeOrder(legacy); assert.equal(up.items[0].currentMerchantId, '
 const lines = [{ id: 'l1', name: 'Cement', quantity: 50, unit: 'bags' }, { id: 'l2', name: 'Iron Rod 12mm', quantity: 40, unit: 'pieces' }, { id: 'l3', name: 'Sharp Sand', quantity: 10, unit: 'tonnes' }, { id: 'l4', name: 'Longspan Roofing Sheet', quantity: 30, unit: 'pieces' }]
 const m1 = matchQuotation(lines, merchants, products, 60)
 const mA1 = m1.results.find((r) => r.merchant.id === 'A'), mB1 = m1.results.find((r) => r.merchant.id === 'B')
-assert.equal(mA1.percentage, 75); assert.equal(mA1.eligible, true, 'A covers 3 of 4 lines')
+assert.equal(mA1.percentage, 100); assert.equal(mA1.eligible, true, 'A lists all 4 requested lines, including the out-of-stock cement listing')
 assert.equal(mB1.eligible, false, 'B is below 60% for the whole order...')
 assert(S.findRerouteCandidates({ ...item(o, 'Cement'), declinedBy: ['A'], currentMerchantId: null }, ctx).some((x) => x.merchantId === 'B'), '...yet may still take ONE rerouted item')
-assert.deepEqual(m1.eligible.map((r) => r.merchant.id), ['A'], 'initial eligible set unchanged; B did not become eligible')
+assert.deepEqual(m1.eligible.map((r) => r.merchant.id), ['A'], 'out-of-stock inventory presence counts, but incompatible specs do not')
 assert.equal(JSON.stringify(matchQuotation(lines, merchants, products, 60)), JSON.stringify(m1), 'matching is pure and unaffected by order actions')
 
 console.log('Sourcing tests passed (unavailable items stay, explicit confirmation, item-level rerouting, eligibility, no-merchant, duplicates, approvals, multi-merchant orders, 95/5 allocation, fulfilment, history, roles, 60% rule intact).')

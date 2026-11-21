@@ -1,7 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { useStore } from '../context/StoreContext'
 import { Btn, Card, Demo } from '../components/ui'
-const HOME = { customer: '/client/home', merchant: '/merchant/overview', admin: '/admin/overview', 'super-admin': '/admin/overview' }
+const HOME = { customer: '/client/home', merchant: '/merchant/overview', admin: '/admin/overview', 'super-admin': '/super-admin/overview' }
 const ACCTS = [['Customer A', 'customer1@waka.test', 'Has ₦500k demo wallet'], ['Customer B', 'customer2@waka.test', 'Empty wallet — test insufficient balance'], ['Merchant A', 'merchant.a@waka.test', 'BuildRight · 8/10 match'], ['Merchant B', 'merchant.b@waka.test', 'PowerHouse · 6/10 match'], ['Merchant C', 'merchant.c@waka.test', 'Tile District · 4/10 (below 60%)'], ['Pending Merchant', 'merchant.pending@waka.test', 'Awaiting approval'], ['Admin', 'admin@waka.test', 'Operations'], ['Super Admin', 'super@waka.test', 'Sourcing, admins, settings']]
 export default function Login() {
   const { login, reset, user } = useStore(), nav = useNavigate()

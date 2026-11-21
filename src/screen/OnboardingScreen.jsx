@@ -13,29 +13,29 @@ const EASE = [0.22, 1, 0.36, 1];
 const SLIDES = [
   {
     eyebrow: "Work smart not hard",
-    lead: "Build better,",
-    accent: " source smarter.",
+    lead: "Build Better,",
+    accent: "Source Smarter.",
     body: "One marketplace for cement, steel, tiles, electricals and more, from merchants we approve.",
     note: "Simple requests. Clear next steps.",
-    image: "/hero.webp",
+    image: "/onboarding.png",
     posMobile: "78% 20%",
   },
   {
     eyebrow: "Trusted help, matched to you",
-    lead: "Paste your list.",
-    accent: "We do the matching.",
+    lead: "One Material List.",
+    accent: " Multiple Merchant Matching.",
     body: "Merchants that can supply at least 60% of your product lines qualify. Compare prices item by item.",
       note: "Local Merchant. Verified profiles.",
-    image: "/onboardingScreen2.webp",
+    image: "/onboarding1.png",
     posMobile: "center 12%",
   },
   {
     eyebrow: "From request to resolved",
-    lead: "Pay once.",
-    accent: "Track every delivery.",
+    lead: "Secure Your Delivery.",
+    accent: "Secure Your Payment.",
     body: "One checkout, even across several merchants. Each merchant ships and updates separately.",
     note: "Updates at every step.",
-    image: "/onboarding4.jpeg",
+    image: "/onboarding2.png",
     posMobile: "60% center",
   },
 ];
@@ -97,7 +97,7 @@ function RevealWords({ text, delay = 0, reduce, accent = false }) {
     >
       <motion.span
         className={`inline-block ${
-          accent ? "text-[#ed0018]" : "text-white"
+          accent ? "text-[#ed0018]" : "text-white "
         }`}
         initial={reduce ? false : { y: "105%", opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
@@ -365,9 +365,20 @@ export default function Onboarding({ onFinish }) {
         }}
       />
 
+      {/* Navy overlay for red-text readability */}
+
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-10"
+        style={{
+          background:
+            "radial-gradient(ellipse 78% 58% at 50% 50%, rgba(4, 18, 55, 0.82) 0%, rgba(4, 18, 55, 0.66) 42%, rgba(4, 18, 55, 0.28) 72%, rgba(4, 18, 55, 0.08) 100%)",
+        }}
+      />
+
       {/* Main layout */}
 
-      <div className="onboarding-fullscreen-layout pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[1800px] flex-col px-5 pb-[max(env(safe-area-inset-bottom),18px)] pt-[max(env(safe-area-inset-top),14px)] sm:px-8 sm:pb-5 sm:pt-6 lg:px-14 lg:pb-7 lg:pt-8">
+      <div className="onboarding-fullscreen-layout pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[1800px] flex-col px-5 pb-[max(env(safe-area-inset-bottom),18px)] pt-[max(env(safe-area-inset-top),14px)] sm:px-8 sm:pb-5 sm:pt-1 lg:px-14 lg:pb-7 lg:pt-8">
 
         {/* Header */}
 
@@ -389,8 +400,8 @@ export default function Onboarding({ onFinish }) {
 
         {/* Main content */}
 
-        <div className="flex min-h-0 flex-1 items-end pt-4 lg:items-center lg:pb-10">
-          <section className="onboarding-fullscreen-copy w-full max-w-[760px]">
+        <div className="flex min-h-0 flex-1 items-center justify-center py-6">
+          <section className="onboarding-fullscreen-copy mx-auto w-full max-w-[760px] text-center">
 
             <AnimatePresence mode="wait">
               <motion.div
@@ -409,7 +420,7 @@ export default function Onboarding({ onFinish }) {
                 {/* Eyebrow */}
 
                 <motion.div
-                  className="mb-3 flex items-center gap-3 sm:mb-5"
+                  className="mb-3 flex items-center justify-center gap-3 sm:mb-5"
                   {...fadeUp(0)}
                 >
                   <span className="h-2 w-2 shrink-0 rounded-full bg-[#ed0018]" />
@@ -421,7 +432,7 @@ export default function Onboarding({ onFinish }) {
 
                 {/* Headline */}
 
-                <h1 className="flex max-w-[14ch] flex-wrap gap-x-[0.24em] text-[clamp(2rem,min(9.5vw,6.4svh),3.6rem)] font-extrabold leading-[1.02] tracking-[-0.06em] text-white [text-shadow:0_2px_24px_rgba(4,18,55,.55)] sm:max-w-[13ch] sm:text-[clamp(2.6rem,7vw,4.6rem)] lg:text-[clamp(3.4rem,5.6vw,5.8rem)] lg:leading-[0.98]">
+                <h1 className="mx-auto flex max-w-[14ch] flex-wrap justify-center gap-x-[0.24em] text-center text-[clamp(2.5rem,min(9.5vw,6.4svh),.6rem)] font-extrabold leading-[1.02] tracking-[-0.06em] text-white [text-shadow:0_2px_24px_rgba(4,18,55,.55)] sm:max-w-[13ch] sm:text-[clamp(2.6rem,7vw,4.6rem)] lg:text-[clamp(3.4rem,5.6vw,5.8rem)] lg:leading-[0.98]">
                   <RevealWords
                     text={currentSlide.lead}
                     delay={0.1}
@@ -430,6 +441,7 @@ export default function Onboarding({ onFinish }) {
 
                   <RevealWords
                     text={currentSlide.accent}
+                    
                     delay={
                       0.1 +
                       currentSlide.lead.split(" ").length * 0.07
@@ -442,7 +454,7 @@ export default function Onboarding({ onFinish }) {
                 {/* Description */}
 
                 <motion.p
-                  className="mt-3 max-w-[48ch] text-sm leading-6 text-white/90 [text-shadow:0_1px_16px_rgba(4,18,55,.7)] sm:mt-6 sm:text-base sm:leading-8 lg:text-lg"
+                  className="mx-auto mt-3 max-w-[48ch] text-center text-sm leading-6 text-white/90 [text-shadow:0_1px_16px_rgba(4,18,55,.7)] sm:mt-6 sm:text-base sm:leading-8 lg:text-lg"
                   {...fadeUp(0.4)}
                 >
                   {currentSlide.body}
@@ -451,7 +463,7 @@ export default function Onboarding({ onFinish }) {
                 {/* Reassurance message */}
 
                 <motion.div
-                  className="mt-5 flex items-center gap-2.5 sm:mt-7"
+                  className="mt-5 flex items-center justify-center gap-2.5 sm:mt-7"
                   {...fadeUp(0.55)}
                 >
                   <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#ed0018] text-white">
@@ -467,7 +479,7 @@ export default function Onboarding({ onFinish }) {
 
             {/* Slide progress */}
 
-            <div className="mt-7 flex items-center gap-2.5 sm:mt-9">
+            <div className="mt-7 flex items-center justify-center gap-2.5 sm:mt-9">
               {SLIDES.map((item, index) => (
                 <button
                   key={item.image}
@@ -493,7 +505,7 @@ export default function Onboarding({ onFinish }) {
 
             {/* Navigation actions */}
 
-            <div className="pointer-events-auto mt-5 flex items-center gap-3 sm:mt-8">
+            <div className="pointer-events-auto mt-5 flex items-center justify-center gap-3 sm:mt-8">
 
               <motion.button
                 type="button"
@@ -506,7 +518,7 @@ export default function Onboarding({ onFinish }) {
                     ? undefined
                     : { scale: 0.98 }
                 }
-                className="group order-2 flex h-12 min-w-0 flex-1 items-center justify-center gap-3 rounded-full bg-[#ed0018] px-6 text-sm font-bold text-white shadow-[0_10px_30px_rgba(176, 131, 131, 0.8)] transition-colors duration-200 hover:bg-[#ed0018] sm:order-1 sm:h-14 sm:min-w-[230px] sm:flex-none sm:gap-4 sm:px-8"
+                className="group order-2 flex h-12 min-w-0 flex-1 items-center justify-center gap-3 rounded-full bg-[#ed0018] px-6 text-sm font-bold text-white shadow-[0_10px_30px_rgba(237,0,24,0.28)] transition-colors duration-200 hover:bg-[#ed0018] sm:order-1 sm:h-14 sm:min-w-[230px] sm:flex-none sm:gap-4 sm:px-8"
               >
                 <span>
                   {isLast ? "Get started" : "Continue"}

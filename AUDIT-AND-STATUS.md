@@ -21,7 +21,7 @@ It had drifted from `Wakastore-demo6.zip`, which your brief names as the base:
 ## Business-logic amendment: unavailable materials, sourcing confirmation, item-level rerouting
 Rules live in `src/services/sourcing.js` (pure, no React) and are applied through `AppStateContext` actions that take the actor from the signed-in session (not from arguments).
 - Every requested line stays in the quotation, cart and order with name, specification, quantity and unit. No exact match / no stock => `SOURCING_REQUESTED` (or `AWAITING_MERCHANT` if no eligible merchant).
-- **Initial matching is unchanged**: 60% of requested LINES, max two merchants, merchants below 60% do not qualify. Unavailable lines are assigned to the best-ranked *eligible* merchant whose categories fit. Rerouting never alters matching results (tested).
+- **Current quotation amendment (18 Nov 2026)**: 60% of requested LINES; every eligible merchant at or above 60% is included (no two-merchant cap); merchants below 60% do not qualify. Unavailable lines are assigned to the best-ranked *eligible* merchant whose categories fit. Rerouting never alters matching results (tested).
 - Merchant order screen: unavailable items first, unticked checkbox "I can source this product." (unticked is never a confirmation); ticking reveals sourcing price (large field), timeframe, supplier notes, notes, "final price" confirmation; recorded with timestamp. "Cannot source this product" needs a confirmation step and reroutes ONLY that item.
 - Rerouting: another approved merchant with a relevant category AND (matching in-stock product, spec-compatible, or `acceptsSourcing`), excluding anyone who declined, never the same item twice, original assignment kept in history. In-stock candidate => item becomes AVAILABLE with a price the customer must approve; sourcing-only candidate => `REROUTED` until THEY confirm. Nobody eligible => `UNRESOLVED` + Super Admin manual-sourcing queue. Nothing is ever claimed as sourced without a merchant confirming.
 - Price changes: first price or an increase needs customer approval (not in the payable total until approved; decreases auto-apply); declining leaves the item unresolved and uncharged; previous price kept in history.
@@ -58,3 +58,22 @@ Removed: the private token matcher in `matching.js`; the old inline `NewQuotatio
 ## Commands
 `npm install` · `npm run dev` · `npm run build`
 Tests: `npm run test:search` · `npm run test:sourcing` · `npm run test:sourcing-e2e` · `npm run test:materials` · `npm run test:e2e` · `npm run test:customer` · `node scripts/test-categories.mjs` · `test-matching` · `test-mvp-matching` · `test-quote-units` · `test-merchant-demo` · `test-engine` · `test-accounts` · `test-state-hydration` · `smoke-integration`
+
+
+## 18 November quotation + chat amendment
+See `MERCHANT-QUOTATION-DEMO.md` and `PROTOTYPE-UPDATE-NOV-18.md` for the current merchant-quotation flow. The older audit sections above describe earlier implementation states and are superseded where they conflict with the 18 November amendment.
+
+
+## 20 November 2026 — final quotation-flow prototype
+- Added `FINAL-PROTOTYPE-NEW-FLOW.md` as the current quotation workflow reference; it supersedes the 18 November quotation notes where they conflict.
+- Matching now counts compatible merchant inventory records even when out of stock. Inventory coverage is not treated as a promise to supply.
+- Added broad material-type selection from registered merchant inventory, including in-stock and out-of-stock records.
+- Merchant quotation requests now require an explicit response for every line: Can be supplied, Can be sourced, or Cannot be sourced. A complete offer must cover every line and the full requested quantity; a Cannot be sourced line blocks submission.
+- Added 24-hour merchant response deadlines and 48-hour quotation validity.
+- Customer quotation comparison prioritizes the two lowest-priced complete, unexpired offers and retains other valid offers for inspection.
+- The selected merchant is responsible for the complete order; quotation orders are not automatically split across suppliers.
+- Added merchant delivery, customer collection and WakaRider selection; collection removes the merchant delivery charge in the demo.
+- Quotation demo payments are recorded as verified with funds pending; 5% commission is calculated on materials only, excluding delivery. Customer acceptance or admin review is required before simulated settlement.
+- Added a customer complete-order acceptance step and an admin review queue for delivered orders awaiting acceptance.
+- Preserved the existing Direct Marketplace routes and standalone merchant onboarding app.
+- Verification: TypeScript transpile syntax check passed for all 72 JS/JSX source files. Matching, MVP matching, sourcing, categories, merchant demo, final-flow rules, engine (33/33), and account tests passed. A full Vite build was not run because dependency installation timed out in this environment; install dependencies locally before launching.

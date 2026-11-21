@@ -13,10 +13,12 @@
     "test:search": "node scripts/test-product-search.mjs",
     "test:sourcing": "node scripts/test-sourcing.mjs",
     "test:sourcing-e2e": "node scripts/e2e-sourcing-flow.mjs",
-    "server": "node server/index.js",
-    "test:price-guard": "node scripts/test-price-guard.mjs",
-    "test:ai-backend": "node scripts/test-ai-backend.mjs",
-    "test:e2e-price": "node scripts/e2e-price-omission.mjs"
+    "test:integration": "node scripts/smoke-integration.mjs",
+    "test:final-flow": "node scripts/test-final-flow.mjs",
+    "test:launch-rules": "node scripts/test-launch-rules.mjs",
+    "test:ops": "node scripts/test-prototype-ops.mjs",
+    "test:ops-pages": "node scripts/test-ops-pages.mjs",
+    "test:launch-flow": "node scripts/test-launch-flow.mjs"
   },
   "dependencies": {
     "@tailwindcss/vite": "latest",
@@ -29,6 +31,7 @@
     "react": "latest",
     "react-dom": "latest",
     "react-router-dom": "latest",
+    "read-excel-file": "^9.3.20",
     "tailwindcss": "latest",
     "vite": "latest"
   },

@@ -43,7 +43,6 @@ export function parseMaterialsList(text = '') {
 // Line <-> product matching now lives in services/productSearch.js (one reusable engine for
 // search, suggestions and quotation matching). Category words never count as proof of stock.
 function lineMatchesProduct(line, product) {
-  if (product.available === false || product.stock <= 0) return { ok: false, reason: 'out_of_stock' }
   const unitLine = normalizeUnit(line.unit)
   const unitProd = normalizeUnit(product.unit)
   if (unitLine && unitProd && unitLine !== unitProd) return { ok: false, reason: 'unit_mismatch' }
@@ -59,7 +58,7 @@ function lineMatchesProduct(line, product) {
 /**
  * @param lines      [{ id, name, quantity, unit, brand?, specs?, category? }]
  * @param merchants  [{ id, name, status, active? }]
- * @param products   [{ id, merchantId, name, price, stock, unit, available, aliases?, specs?, brand? }]
+ * @param products   Inventory presence qualifies regardless of stock state; stock is only contextual, not a promise to supply.
  * @param threshold  percent, default 60
  */
 export function matchQuotation(lines, merchants, products, threshold = DEFAULT_THRESHOLD) {
@@ -78,11 +77,11 @@ export function matchQuotation(lines, merchants, products, threshold = DEFAULT_T
           const suggested = mine.find((p) => lineMatchesProduct(line, p).reason === 'spec_unconfirmed')
           return unmatched.push({ line, ...(near ? { soldPerUnit: near.unit } : {}), ...(suggested ? { suggestedProduct: suggested } : {}) })
         }
-        const availableQty = Math.min(line.quantity, hit.p.stock)
+        const availableQty = Math.min(Number(line.quantity) || 0, Math.max(0, Number(hit.p.stock) || 0))
         matched.push({
           line, product: hit.p, unitPrice: hit.p.price, availableQty,
           shortfall: Math.max(0, line.quantity - hit.p.stock),
-          partial: hit.p.stock < line.quantity,
+          partial: Number(hit.p.stock) < Number(line.quantity),
           lineTotal: availableQty * hit.p.price
         })
       })
@@ -124,15 +123,14 @@ export function groupSelectionByMerchant(selection) {
 }
 
 /**
- * Select the two strongest merchants for the WakaStore MVP.
+ * Prepare a complete quotation request for EVERY eligible merchant.
  * Eligibility remains line-coverage based (60% by default); the returned
- * offer template always contains every requested line. Lines not held in
- * stock are explicitly marked for merchant sourcing and must be priced by
- * the merchant before the quotation can be sent to the customer.
+ * request template contains every requested line for each eligible merchant.
+ * Initial matching reveals merchant eligibility, not catalogue prices.
  */
-export function matchTwoMerchantOffers(lines, merchants, products, threshold = DEFAULT_THRESHOLD) {
+export function matchEligibleMerchantOffers(lines, merchants, products, threshold = DEFAULT_THRESHOLD) {
   const match = matchQuotation(lines, merchants, products, threshold)
-  const selected = match.eligible.slice(0, 2).map((result, index) => {
+  const selected = match.eligible.map((result, index) => {
     const matchedByLine = new Map(result.matched.map((item) => [item.line.id, item]))
     const unmatchedByLine = new Map(result.unmatched.map((item) => [item.line.id, item]))
     const completeItems = lines.map((line) => {
@@ -188,9 +186,13 @@ export function matchTwoMerchantOffers(lines, merchants, products, threshold = D
     ...match,
     offers: selected,
     offersFound: selected.length,
-    requiresManualSourcing: selected.length < 2,
-    message: selected.length === 2
-      ? 'Two qualified merchants selected. Each must quote the complete materials list, including outsourced items.'
-      : `Only ${selected.length} qualified merchant offer${selected.length === 1 ? '' : 's'} found. Do not fabricate a second offer; widen the search or request admin sourcing.`
+    dispatchedToAllEligible: true,
+    requiresManualSourcing: selected.length === 0,
+    message: selected.length
+      ? `Quotation request prepared for all ${selected.length} eligible merchant(s). Each must independently quote the complete materials list, including requested variations and items they need to source.`
+      : 'No merchant reached the 60% threshold. Send the request for manual sourcing.' 
   }
 }
+
+// Backwards-compatible alias; the function returns every eligible merchant, not just two.
+export const matchTwoMerchantOffers = matchEligibleMerchantOffers

@@ -4,7 +4,7 @@ import { Check, ChevronLeft } from 'lucide-react'
 import { useAppState } from '../context/AppStateContext'
 import { categories } from '../constants/categories'
 
-const HOME = { customer: '/client/overview', merchant: '/merchant/overview', admin: '/admin/overview', 'super-admin': '/admin/overview' }
+const HOME = { customer: '/client/overview', merchant: '/merchant/overview', admin: '/admin/overview', 'super-admin': '/super-admin/overview' }
 const field = 'w-full rounded-xl border border-[var(--line)] bg-[var(--surface)] p-3 text-sm outline-none focus:border-[var(--red)]'
 const catName = (c) => (Array.isArray(c) ? c[0] : typeof c === 'string' ? c : c.name)
 const F = ({ label, children }) => <label className="block text-sm font-semibold">{label}<div className="mt-1 font-normal">{children}</div></label>

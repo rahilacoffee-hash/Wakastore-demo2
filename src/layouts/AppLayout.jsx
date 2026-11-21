@@ -22,6 +22,9 @@ import {
   X,
   ChevronRight,
   Settings,
+  BellRing,
+  ScrollText,
+  UserCog,
 } from "lucide-react";
 import { useTheme } from "../context/ThemeContext";
 import { useAppState } from "../context/AppStateContext";
@@ -39,6 +42,7 @@ const merchant = [
   ["Overview", "overview", LayoutDashboard],
   ["My Products", "products", Store],
   ["Inventory", "inventory", Boxes],
+  ["Quotation Requests", "quotations", FileText],
   ["Incoming Orders", "orders", PackageCheck],
   ["Fulfillment", "fulfillment", Truck],
   ["Earnings", "earnings", ChartNoAxesCombined],
@@ -57,8 +61,22 @@ const admin = [
   ["Settlements", "settlements", BadgeDollarSign],
   ["Complaints & Refunds", "complaints", MessageSquareWarning],
   ["Reports", "reports", ChartNoAxesCombined],
+  ["Notification log", "notification-log", BellRing],
+  ["Audit log", "audit", ScrollText],
 ];
-const maps = { client, merchant, admin };
+const superAdmin = [
+  ["Overview", "overview", LayoutDashboard],
+  ["Admin accounts", "team", UserCog],
+  ["Platform settings", "settings", Settings],
+  ["Sourcing", "sourcing", SearchCheck],
+  ["Payments", "payments", CreditCard],
+  ["Settlements", "settlements", BadgeDollarSign],
+  ["Reports", "reports", ChartNoAxesCombined],
+  ["Quotations", "quotations", FileText],
+  ["Notification log", "notification-log", BellRing],
+  ["Audit log", "audit", ScrollText],
+];
+const maps = { client, merchant, admin, "super-admin": superAdmin };
 function Brand() {
   return (
     <div className="brand">
@@ -81,7 +99,7 @@ export default function AppLayout({ role, children }) {
   const title = nav.find((item) => item[1] === active)?.[0] || "Overview";
   const mobilePrimary =
     role === "merchant"
-      ? [nav[0], nav[3], nav[1], nav[6]]
+      ? [nav[0], nav[3], nav[1], nav[7]]
       : [nav[0], nav[1], nav[6], nav[7]].filter(Boolean);
   const logout = () => {
     signOut();
@@ -106,9 +124,7 @@ export default function AppLayout({ role, children }) {
       <aside className="sidebar">
         <Brand />
         <div className="role-chip">
-          {role === "admin" && location.pathname.includes("sourcing")
-            ? "Super Admin workspace"
-            : `${role} workspace`}
+          {role === "super-admin" ? "Super Admin workspace" : `${role} workspace`}
         </div>
         <nav>
           <NavItems />

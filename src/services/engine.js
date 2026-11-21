@@ -15,7 +15,7 @@ export const walletBalance = (s, customerId) =>
 export const calcTotals = (s, groups) => {
   const subtotal = groups.reduce((n, g) => n + g.items.reduce((m, i) => m + i.quantity * i.unitPrice, 0), 0)
   const fee = Math.round(subtotal * s.settings.feeRate)
-  return { subtotal, fee, total: subtotal + fee }
+  return { subtotal, fee, total: subtotal }
 }
 
 function notify(d, { userId, roles, title, message, type, ref, route }) {

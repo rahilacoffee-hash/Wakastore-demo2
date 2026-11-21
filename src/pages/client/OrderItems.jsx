@@ -100,6 +100,23 @@ function Item({ order, item }) {
 // One coordinated order, shown item by item with the merchant responsible for each.
 export default function OrderItems({ order }) {
   let { state } = useAppState();
+  if (order.fullOrderRequired) {
+    return (
+      <section className="mt-5 rounded-2xl border border-[var(--line)] bg-[var(--surface)] p-4 sm:p-5" aria-label="Complete quotation order materials">
+        <p className="text-[10px] font-extrabold uppercase tracking-[.16em] text-[var(--muted)]">One complete order · one primary merchant</p>
+        <h2 className="mt-1 text-lg font-extrabold">Materials in your order</h2>
+        <ul className="mt-3 divide-y divide-[var(--line)]">
+          {(order.items || []).map((item, index) => (
+            <li key={`${order.id}-${index}`} className="flex flex-wrap items-start justify-between gap-3 py-3">
+              <div><b className="text-sm">{item.name}</b><p className="text-xs text-[var(--muted)]">{item.quantity} {item.unit} · {item.supplyStatus === "CAN_SOURCE" ? `Merchant will source${item.sourcingTime ? ` · ${item.sourcingTime}` : ""}` : "Merchant has confirmed supply"}</p></div>
+              <div className="text-right"><b className="text-sm">{formatNaira(item.lineTotal || 0)}</b><p className="text-[11px] text-[var(--muted)]">{formatNaira(item.unitPrice || item.price || 0)} / {item.unit || "unit"}</p></div>
+            </li>
+          ))}
+        </ul>
+        <p className="mt-3 rounded-xl bg-[var(--soft)] p-3 text-xs text-[var(--muted)]">This is a complete-list order. Partial delivery or item-by-item acceptance is not supported in this quotation flow.</p>
+      </section>
+    );
+  }
   if (!order.items?.length || !order.items.every((i) => i.itemId)) return null;
   let t = orderTotals(order, 0.025);
   let alloc = merchantAllocations(order);
