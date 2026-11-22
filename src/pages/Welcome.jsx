@@ -362,7 +362,7 @@ export default function Welcome() {
 
         <button
           type="button"
-          onClick={() => navigate("/")}
+          onClick={() => navigate("/path")}
           className="group inline-flex h-10 items-center gap-2 rounded-full border border-[#171717]/15 bg-white/70 px-4 text-sm font-semibold text-[#171717] transition-colors hover:border-[#ED0018]/40 hover:bg-[#FCEBED] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ED0018]"
         >
           <ArrowLeft
