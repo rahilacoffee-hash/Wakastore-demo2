@@ -57,6 +57,7 @@ import StartScreen from "../screen/StartScreen";
 import LoadingScreen from "../screen/LoadingScreen";
 import AdminLogin from "../pages/AdminLogin";
 import Onboarding from "../screen/OnboardingScreen";
+import Start from "../screen/Start";
 
 function MarketplaceRedirect() {
   const { search } = useLocation();
@@ -89,6 +90,7 @@ export default function AppRouter() {
         <Route path="/loading" element={<LoadingScreen />} />
 
           <Route path="/onboarding/:slide" element={<Onboarding />} />
+          <Route path="/path" element={<Start />} />
         <Route
           path="/welcome"
           element={
