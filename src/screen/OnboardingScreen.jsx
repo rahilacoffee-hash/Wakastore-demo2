@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { ArrowLeft, ArrowRight, Check, ShieldCheck } from "lucide-react";
 import { useNavigate, useParams } from "react-router-dom";
 
 import WakastoreLogo from "../components/ui/WakastoreLogo";
+import HalftoneReveal from "../components/ui/HalftoneReveal";
 
 const EASE = [0.22, 1, 0.36, 1];
 
@@ -15,7 +16,7 @@ const SLIDES = [
     body: "One marketplace for cement, steel, tiles, electricals and more, from merchants we approve.",
     note: "Simple requests. Clear next steps.",
     image: "/onboarding.png",
-    pos: "78% 20%",
+    posMobile: "78% 20%",
   },
   {
     eyebrow: "Trusted help, matched to you",
@@ -24,7 +25,7 @@ const SLIDES = [
     body: "Merchants that can supply at least 60% of your product lines qualify. Compare prices item by item.",
     note: "Local merchants. Verified profiles.",
     image: "/onboarding1.png",
-    pos: "center 12%",
+    posMobile: "center 12%",
   },
   {
     eyebrow: "From request to resolved",
@@ -33,7 +34,7 @@ const SLIDES = [
     body: "One checkout, even across several merchants. Each merchant ships and updates separately.",
     note: "Updates at every step.",
     image: "/onboarding2.png",
-    pos: "60% center",
+    posMobile: "60% center",
   },
 ];
 
@@ -41,26 +42,43 @@ const LAST_INDEX = SLIDES.length - 1;
 
 function parseSlide(param) {
   if (!/^\d+$/.test(param ?? "")) return 0;
-
   const parsed = Number(param);
-
   if (!Number.isFinite(parsed)) return 0;
-
   return Math.min(Math.max(parsed - 1, 0), LAST_INDEX);
 }
 
-/* Headline line, word-by-word reveal, wraps by word */
-function RevealLine({
-  text,
-  delay = 0,
-  reduce,
-  accent = false,
-  className = "",
-}) {
+function useMediaQuery(query) {
+  const [matches, setMatches] = useState(() => {
+    if (typeof window === "undefined" || !window.matchMedia) return false;
+    return window.matchMedia(query).matches;
+  });
+
+  useEffect(() => {
+    if (!window.matchMedia) return undefined;
+    const media = window.matchMedia(query);
+    const update = () => setMatches(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, [query]);
+
+  return matches;
+}
+
+function detectWebGL2() {
+  try {
+    if (typeof document === "undefined") return false;
+    const canvas = document.createElement("canvas");
+    return Boolean(canvas.getContext("webgl2"));
+  } catch {
+    return false;
+  }
+}
+
+/* One headline line, word-by-word reveal, centered */
+function RevealLine({ text, delay = 0, reduce, accent = false }) {
   return (
-    <span
-      className={`flex flex-wrap justify-start gap-x-[0.24em] ${className}`}
-    >
+    <span className="flex flex-wrap justify-center gap-x-[0.24em]">
       {text
         .trim()
         .split(" ")
@@ -71,12 +89,12 @@ function RevealLine({
           >
             <motion.span
               className={`inline-block ${
-                accent ? "text-[#ed0018]" : "text-[#061744]"
+                accent ? "text-[#ff3b4e]" : "text-white"
               }`}
               initial={reduce ? false : { y: "110%", opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               transition={{
-                duration: 0.65,
+                duration: 0.7,
                 ease: EASE,
                 delay: delay + index * 0.07,
               }}
@@ -94,6 +112,9 @@ export default function Onboarding({ onFinish }) {
   const { slide: slideParam } = useParams();
 
   const reduce = useReducedMotion();
+  const isDesktop = useMediaQuery("(min-width: 1024px)");
+  const [canWebGL2] = useState(detectWebGL2);
+
   const touchStartX = useRef(null);
 
   const step = parseSlide(slideParam);
@@ -104,7 +125,6 @@ export default function Onboarding({ onFinish }) {
 
   useEffect(() => {
     const validSlide = String(step + 1);
-
     if (slideParam !== validSlide) {
       navigate(`/onboarding/${validSlide}`, { replace: true });
     }
@@ -126,9 +146,7 @@ export default function Onboarding({ onFinish }) {
   );
 
   const tick = useCallback(() => {
-    if (typeof navigator !== "undefined") {
-      navigator.vibrate?.(8);
-    }
+    if (typeof navigator !== "undefined") navigator.vibrate?.(8);
   }, []);
 
   const nextStep = useCallback(() => {
@@ -136,7 +154,6 @@ export default function Onboarding({ onFinish }) {
       finishOnboarding();
       return;
     }
-
     goToStep(step + 1);
   }, [finishOnboarding, goToStep, isLast, step]);
 
@@ -166,16 +183,11 @@ export default function Onboarding({ onFinish }) {
         previousStep();
       }
 
-      if (event.key === "Escape") {
-        finishOnboarding();
-      }
+      if (event.key === "Escape") finishOnboarding();
     };
 
     window.addEventListener("keydown", handleKeyDown);
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [finishOnboarding, isLast, nextStep, previousStep, step]);
 
   /* ---------- Touch navigation ---------- */
@@ -188,19 +200,14 @@ export default function Onboarding({ onFinish }) {
     if (touchStartX.current === null) return;
 
     const endX = event.changedTouches[0]?.clientX;
-
     if (endX === undefined) return;
 
     const delta = endX - touchStartX.current;
 
     if (Math.abs(delta) > 65) {
       tick();
-
-      if (delta < 0) {
-        nextStep();
-      } else {
-        previousStep();
-      }
+      if (delta < 0) nextStep();
+      else previousStep();
     }
 
     touchStartX.current = null;
@@ -209,294 +216,278 @@ export default function Onboarding({ onFinish }) {
   /* ---------- Animation helpers ---------- */
 
   const fadeUp = (delay = 0) => ({
-    initial: reduce ? false : { opacity: 0, y: 14 },
+    initial: reduce ? false : { opacity: 0, y: 16 },
     animate: { opacity: 1, y: 0 },
-    transition: { duration: 0.55, ease: EASE, delay },
+    transition: { duration: 0.6, ease: EASE, delay },
   });
 
   /* ---------- Render ---------- */
 
   return (
     <main
-      className="relative flex h-[100dvh] min-h-[100svh] w-full flex-col overflow-hidden bg-[#061744] text-[#061744] lg:flex-row"
+      className="relative h-[100dvh] min-h-[100svh] w-full overflow-hidden bg-[#061744] text-white"
       onTouchStart={handleTouchStart}
       onTouchEnd={handleTouchEnd}
     >
-      {/* ---------- Photo ---------- */}
-      <div className="relative h-[40dvh] shrink-0 overflow-hidden bg-[#061744] lg:h-full lg:w-[52%]">
-        <AnimatePresence initial={false}>
-          <motion.img
-            key={currentSlide.image}
-            src={currentSlide.image}
-            alt=""
-            aria-hidden="true"
-            className="absolute inset-0 h-full w-full object-cover"
-            style={{ objectPosition: currentSlide.pos }}
-            initial={{ opacity: 0, scale: reduce ? 1 : 1.07 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: reduce ? 0 : 0.9, ease: "easeInOut" }}
-          />
-        </AnimatePresence>
+      {/* Background photography */}
+      <div className="onboarding-background absolute inset-0 z-0 bg-[#061744]">
+        {canWebGL2 ? (
+          <AnimatePresence initial={false}>
+            <motion.div
+              key={currentSlide.image}
+              className="absolute inset-0"
+              style={{ touchAction: "pan-y" }}
+              initial={{ opacity: 0, scale: reduce ? 1 : 1.04 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{
+                duration: reduce ? 0 : 0.9,
+                ease: "easeInOut",
+              }}
+            >
+              <HalftoneReveal
+                src={currentSlide.image}
+                fit="cover"
+                mode="duotone"
+                shape="dot"
+                cellSize={isDesktop ? 7 : 6}
+                angle={45}
+                inkColor="#7cc0ff"
+                accentColor="#ed0018"
+                paperColor="#e2a7ad"
+                contrast={1.15}
+                brightness={0.02}
+                dotScale={1}
+                revealRadius={isDesktop ? 150 : 100}
+                softness={0.7}
+                linger={1.2}
+                reverse
+                clickBurst
+                intro={false}
+              />
+            </motion.div>
+          </AnimatePresence>
+        ) : (
+          SLIDES.map((item, index) => (
+            <img
+              key={item.image}
+              src={item.image}
+              alt=""
+              aria-hidden="true"
+              className={`absolute inset-0 h-full w-full object-cover transition-opacity duration-700 motion-reduce:transition-none lg:object-center ${
+                index === step ? "opacity-100" : "opacity-0"
+              }`}
+              style={{ objectPosition: item.posMobile }}
+            />
+          ))
+        )}
+      </div>
 
-        {/* Navy tint */}
-        <div
+      {/* Centered navy overlay so the middle text always reads */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-10"
+        style={{
+          background:
+            "radial-gradient(ellipse 80% 65% at 50% 52%, rgba(4,18,55,0.9) 0%, rgba(4,18,55,0.74) 45%, rgba(4,18,55,0.32) 75%, rgba(4,18,55,0.12) 100%)",
+        }}
+      />
+
+      {/* Top and bottom fades */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 top-0 z-10 h-40"
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(4,18,55,0.75), transparent)",
+        }}
+      />
+
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-10 h-40"
+        style={{
+          background:
+            "linear-gradient(0deg, rgba(4,18,55,0.75), transparent)",
+        }}
+      />
+
+      {/* Red glow behind the content */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute left-1/2 top-1/2 z-10 h-[26rem] w-[26rem] -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#ed0018]/20 blur-[120px]"
+      />
+
+      {/* Big outlined slide number behind the content */}
+      <AnimatePresence mode="wait">
+        <motion.span
+          key={`num-${step}`}
           aria-hidden="true"
-          className="absolute inset-0 bg-[#061744]/30"
-        />
+          className="pointer-events-none absolute left-1/2 top-1/2 z-10 -translate-x-1/2 -translate-y-1/2 select-none text-[clamp(14rem,70vw,22rem)] font-extrabold leading-none tracking-[-0.08em] text-transparent lg:text-[clamp(20rem,34vw,34rem)]"
+          style={{ WebkitTextStroke: "1.5px rgba(255,255,255,0.09)" }}
+          initial={reduce ? false : { opacity: 0, scale: 0.94 }}
+          animate={{ opacity: 1, scale: 1 }}
+          exit={{ opacity: 0 }}
+          transition={{ duration: 0.7, ease: EASE }}
+        >
+          0{step + 1}
+        </motion.span>
+      </AnimatePresence>
 
-        {/* Top fade so logo and Skip always read */}
-        <div
-          aria-hidden="true"
-          className="absolute inset-x-0 top-0 h-32 bg-gradient-to-b from-[#061744]/85 to-transparent"
-        />
+      {/* Main layout */}
+      <div className="onboarding-fullscreen-layout pointer-events-none relative z-20 mx-auto flex h-full w-full max-w-[1800px] flex-col px-5 pb-[max(env(safe-area-inset-bottom),18px)] pt-[max(env(safe-area-inset-top),14px)] sm:px-8 sm:pb-5 sm:pt-4 lg:px-14 lg:pb-7 lg:pt-8">
+        {/* Story-style progress */}
+      
 
-        {/* Header over photo */}
-        <header className="absolute inset-x-0 top-0 z-10 flex items-center justify-between gap-4 px-5 pt-[max(env(safe-area-inset-top),14px)] sm:px-8 sm:pt-6 lg:px-12 lg:pt-8">
-          <div className="[&_img]:max-w-[124px] [&_img]:brightness-0 [&_img]:invert sm:[&_img]:max-w-[160px]">
+        {/* Header */}
+        <header className="relative mt-2 flex shrink-0 items-center justify-between gap-4 sm:mt-4">
+          <div className="[&_img]:max-w-[130px] [&_img]:brightness-0 [&_img]:invert sm:[&_img]:max-w-[165px]">
             <WakastoreLogo />
           </div>
 
-          {!isLast && (
+          {!isLast ? (
             <button
               type="button"
               onClick={() => {
                 tick();
                 finishOnboarding();
               }}
-              className="inline-flex h-9 items-center rounded-full border border-white/40 bg-white/10 px-4 text-xs font-bold text-white backdrop-blur-md transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              className="pointer-events-auto inline-flex h-9 items-center rounded-full border border-white/25 bg-white/10 px-4 text-xs font-bold text-white backdrop-blur-md transition-colors hover:bg-white/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ff3b4e]"
             >
               Skip
             </button>
+          ) : (
+            <span className="h-9" />
           )}
         </header>
 
-        {/* Big outlined number on the photo (desktop) */}
-        <AnimatePresence mode="wait">
-          <motion.span
-            key={`num-${step}`}
-            aria-hidden="true"
-            className="pointer-events-none absolute bottom-6 left-10 hidden select-none text-[clamp(8rem,16vw,15rem)] font-extrabold leading-none tracking-[-0.08em] text-transparent lg:block"
-            style={{ WebkitTextStroke: "2px rgba(255,255,255,0.75)" }}
-            initial={reduce ? false : { opacity: 0, y: 30 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.6, ease: EASE }}
-          >
-            0{step + 1}
-          </motion.span>
-        </AnimatePresence>
-      </div>
-
-      {/* ---------- White sheet / panel ---------- */}
-      <section className="relative z-10 -mt-7 flex min-h-0 flex-1 flex-col overflow-hidden rounded-t-[30px] shadow-[0_-20px_50px_rgba(6,23,68,0.25)] lg:mt-0 lg:w-[48%] lg:flex-none lg:rounded-none lg:shadow-none">
-        {/* ----- Decorative background layer ----- */}
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0">
-          {/* Base gradient: white to soft red tint to soft navy tint */}
-          <div
-            className="absolute inset-0"
-            style={{
-              background:
-                "linear-gradient(155deg, #ffffff 0%, #fff3f4 38%, #eef3ff 78%, #dfe8ff 100%)",
-            }}
-          />
-
-          {/* Dot grid, fades out toward the bottom-left */}
-          <div
-            className="absolute inset-0 opacity-70"
-            style={{
-              backgroundImage:
-                "radial-gradient(rgba(6,23,68,0.16) 1.2px, transparent 1.2px)",
-              backgroundSize: "22px 22px",
-              maskImage:
-                "radial-gradient(ellipse 85% 70% at 100% 0%, black, transparent 75%)",
-              WebkitMaskImage:
-                "radial-gradient(ellipse 85% 70% at 100% 0%, black, transparent 75%)",
-            }}
-          />
-
-          {/* Red glow, top right */}
-          <div className="absolute -right-24 -top-24 h-72 w-72 rounded-full bg-[#ed0018]/20 blur-[90px]" />
-
-          {/* Navy glow, bottom left */}
-          <div className="absolute -bottom-32 -left-24 h-80 w-80 rounded-full bg-[#1f4fd8]/20 blur-[100px]" />
-
-          {/* Concentric rings, top right */}
-          <div className="absolute -right-20 -top-20 h-64 w-64 rounded-full border border-[#ed0018]/25" />
-          <div className="absolute -right-8 -top-8 h-40 w-40 rounded-full border border-[#ed0018]/20" />
-          <div className="absolute right-6 top-6 h-16 w-16 rounded-full border border-[#061744]/10" />
-
-          {/* Diagonal stripes, bottom right */}
-          <div
-            className="absolute -bottom-10 -right-10 h-56 w-56 opacity-60"
-            style={{
-              backgroundImage:
-                "repeating-linear-gradient(135deg, rgba(237,0,24,0.18) 0 2px, transparent 2px 14px)",
-              maskImage:
-                "radial-gradient(circle at 100% 100%, black, transparent 70%)",
-              WebkitMaskImage:
-                "radial-gradient(circle at 100% 100%, black, transparent 70%)",
-            }}
-          />
-
-          {/* Huge outlined number watermark */}
-          <AnimatePresence mode="wait">
-            <motion.span
-              key={`wm-${step}`}
-              className="absolute -bottom-6 right-2 select-none text-[clamp(9rem,40vw,13rem)] font-extrabold leading-none tracking-[-0.08em] text-transparent lg:-bottom-10 lg:right-6 lg:text-[clamp(12rem,18vw,18rem)]"
-              style={{ WebkitTextStroke: "2px rgba(6,23,68,0.09)" }}
-              initial={reduce ? false : { opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.6, ease: EASE }}
-            >
-              0{step + 1}
-            </motion.span>
-          </AnimatePresence>
-
-          {/* Red top accent bar (mobile) */}
-          <span className="absolute inset-x-0 top-0 h-1 bg-[#ed0018] lg:hidden" />
-
-          {/* Red vertical edge (desktop) */}
-          <span className="absolute inset-y-0 left-0 hidden w-1 bg-gradient-to-b from-[#ed0018] via-[#ed0018]/40 to-transparent lg:block" />
-        </div>
-
-        {/* ----- Scrolling content ----- */}
-        <div className="relative z-10 flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-[max(env(safe-area-inset-bottom),18px)] pt-6 sm:px-10 sm:pt-8 lg:justify-center lg:px-16 lg:py-10 xl:px-24">
-          <div className="mx-auto flex w-full max-w-[560px] flex-1 flex-col justify-between lg:flex-none lg:justify-start">
-            <div>
-              {/* Progress pills */}
-              <div className="mb-4 flex items-center gap-2 sm:mb-6">
-                {SLIDES.map((item, index) => (
-                  <button
-                    key={item.image}
-                    type="button"
-                    aria-label={`Go to slide ${index + 1}`}
-                    aria-current={step === index ? "step" : undefined}
-                    onClick={() => {
-                      tick();
-                      goToStep(index);
-                    }}
-                    className={`h-2 rounded-full transition-all duration-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#ed0018] ${
-                      step === index
-                        ? "w-10 bg-[#ed0018]"
-                        : "w-2 bg-[#061744]/20 hover:bg-[#061744]/40"
-                    }`}
-                  />
-                ))}
-
-                <span className="ml-2 text-[11px] font-bold tabular-nums tracking-[0.14em] text-[#061744]/50">
-                  0{step + 1} / 0{SLIDES.length}
-                </span>
-              </div>
-
-              <AnimatePresence mode="wait">
+        {/* Centered content */}
+        <div className="flex min-h-0 flex-1 items-center justify-center py-4">
+          <section className="onboarding-fullscreen-copy mx-auto w-full max-w-[760px] text-center">
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={`content-${step}`}
+                exit={
+                  reduce
+                    ? undefined
+                    : { opacity: 0, transition: { duration: 0.15 } }
+                }
+              >
+                {/* Eyebrow chip */}
                 <motion.div
-                  key={`content-${step}`}
-                  exit={
-                    reduce
-                      ? undefined
-                      : { opacity: 0, transition: { duration: 0.15 } }
-                  }
+                  className="mb-4 inline-flex items-center gap-2.5 rounded-full border border-white/20 bg-white/10 px-3.5 py-1.5 backdrop-blur-md sm:mb-6"
+                  {...fadeUp(0)}
                 >
-                  {/* Eyebrow pill */}
-                  <motion.p
-                    className="mb-3 inline-flex items-center gap-2 rounded-full border border-[#ed0018]/25 bg-white/80 px-3 py-1.5 text-[11px] font-extrabold uppercase tracking-[0.18em] text-[#ed0018] shadow-[0_4px_14px_rgba(237,0,24,0.08)] backdrop-blur-sm sm:mb-5 sm:text-xs"
-                    {...fadeUp(0)}
-                  >
-                    <span className="h-1.5 w-1.5 rounded-full bg-[#ed0018]" />
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[#ff3b4e] opacity-70 motion-reduce:animate-none" />
+                    <span className="relative inline-flex h-2 w-2 rounded-full bg-[#ff3b4e]" />
+                  </span>
+
+                  <p className="text-[10px] font-extrabold uppercase tracking-[0.18em] text-white sm:text-xs sm:tracking-[0.2em]">
                     {currentSlide.eyebrow}
-                  </motion.p>
-
-                  {/* Headline */}
-                  <h1 className="flex flex-col items-start font-extrabold tracking-[-0.055em]">
-                    <RevealLine
-                      text={currentSlide.lead}
-                      delay={0.08}
-                      reduce={reduce}
-                      className="mb-1 text-[clamp(3rem,8.6vw,3rem)] leading-[1.02] sm:mb-2 sm:text-[clamp(2.8rem,6vw,4.2rem)] lg:text-[clamp(3rem,4vw,4.8rem)]"
-                    />
-
-                    <RevealLine
-                      text={currentSlide.accent}
-                      delay={
-                        0.08 + currentSlide.lead.trim().split(" ").length * 0.07
-                      }
-                      accent
-                      reduce={reduce}
-                      className="text-[clamp(2rem,6vw,2.1rem)] leading-[1.05] sm:text-[clamp(1.9rem,4vw,2.8rem)] lg:text-[clamp(2rem,2.8vw,3.2rem)]"
-                    />
-                  </h1>
-
-                  {/* Description */}
-                  <motion.p
-                    className="mt-3 max-w-[46ch] text-sm leading-6 text-[#061744]/75 sm:mt-5 sm:text-base sm:leading-7"
-                    {...fadeUp(0.35)}
-                  >
-                    {currentSlide.body}
-                  </motion.p>
-
-                  {/* Note card */}
-                  <motion.div
-                    className="mt-4 inline-flex items-center gap-2.5 rounded-2xl border border-[#061744]/10 bg-white/85 py-2 pl-2 pr-4 shadow-[0_8px_24px_rgba(6,23,68,0.08)] backdrop-blur-sm sm:mt-6 [@media(max-height:700px)]:hidden"
-                    {...fadeUp(0.5)}
-                  >
-                    <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-[#ed0018] text-white">
-                      <Check size={15} strokeWidth={3} />
-                    </span>
-
-                    <span className="text-xs font-bold text-[#061744] sm:text-sm">
-                      {currentSlide.note}
-                    </span>
-                  </motion.div>
+                  </p>
                 </motion.div>
-              </AnimatePresence>
-            </div>
+
+                {/* Headline: lead on line one, accent on line two */}
+                <h1 className="flex flex-col items-center text-center text-[clamp(2.9rem,min(9vw,6.2svh),3.2rem)] font-extrabold leading-[1.04] tracking-[-0.055em] text-white [text-shadow:0_2px_28px_rgba(4,18,55,.6)] sm:text-[clamp(2.6rem,6vw,4.4rem)] lg:text-[clamp(3.2rem,4.8vw,5.2rem)] lg:leading-[1]">
+                  <RevealLine
+                    text={currentSlide.lead}
+                    delay={0.1}
+                    reduce={reduce}
+                  />
+
+                  <RevealLine
+                    text={currentSlide.accent}
+                    delay={
+                      0.1 + currentSlide.lead.trim().split(" ").length * 0.07
+                    }
+                    accent
+                    reduce={reduce}
+                  />
+                </h1>
+
+                {/* Description */}
+                <motion.p
+                  className="mx-auto mt-4 max-w-[48ch] text-sm leading-6 text-white/85 [text-shadow:0_1px_16px_rgba(4,18,55,.7)] sm:mt-6 sm:text-base sm:leading-8 lg:text-lg"
+                  {...fadeUp(0.4)}
+                >
+                  {currentSlide.body}
+                </motion.p>
+
+                {/* Reassurance chip */}
+                <motion.div
+                  className="mt-5 inline-flex items-center gap-2.5 rounded-full border border-white/15 bg-white/[0.08] py-1.5 pl-1.5 pr-4 backdrop-blur-md sm:mt-7"
+                  {...fadeUp(0.55)}
+                >
+                  <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#ed0018] text-white">
+                    <Check size={14} strokeWidth={2.8} />
+                  </span>
+
+                  <span className="text-xs font-semibold tracking-[0.01em] text-white/90 sm:text-sm">
+                    {currentSlide.note}
+                  </span>
+                </motion.div>
+              </motion.div>
+            </AnimatePresence>
 
             {/* Actions */}
-            <div className="mt-5 sm:mt-8">
-              <div className="flex items-center gap-3">
-                {step > 0 && (
-                  <motion.button
-                    type="button"
-                    aria-label="Previous slide"
-                    onClick={() => {
-                      tick();
-                      previousStep();
-                    }}
-                    whileTap={reduce ? undefined : { scale: 0.95 }}
-                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border-2 border-[#061744]/15 bg-white/80 text-[#061744] transition-colors duration-200 hover:border-[#061744] hover:bg-[#061744] hover:text-white sm:h-14 sm:w-14"
-                  >
-                    <ArrowLeft size={20} />
-                  </motion.button>
-                )}
-
+            <div className="pointer-events-auto mt-7 flex items-center justify-center gap-3 sm:mt-9">
+              {step > 0 && (
                 <motion.button
                   type="button"
+                  aria-label="Previous slide"
                   onClick={() => {
                     tick();
-                    nextStep();
+                    previousStep();
                   }}
-                  whileTap={reduce ? undefined : { scale: 0.98 }}
-                  className="group flex h-12 min-w-0 flex-1 items-center justify-center gap-3 rounded-full bg-[#ed0018] px-6 text-sm font-bold text-white shadow-[0_12px_30px_rgba(237,0,24,0.3)] transition-colors duration-200 hover:bg-[#c90015] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#ed0018]/30 sm:h-14 sm:max-w-[320px] sm:px-9"
+                  whileTap={reduce ? undefined : { scale: 0.96 }}
+                  className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-white/30 bg-white/10 text-white backdrop-blur-md transition-colors duration-200 hover:bg-white/20 sm:h-14 sm:w-14"
                 >
-                  <span>{isLast ? "Get started" : "Continue"}</span>
-
-                  <ArrowRight
-                    size={19}
-                    className="transition-transform duration-200 group-hover:translate-x-1"
-                  />
+                  <ArrowLeft size={20} />
                 </motion.button>
-              </div>
+              )}
 
-              <p className="mt-5 hidden items-center gap-2 text-xs font-medium tracking-[0.04em] text-[#061744]/55 lg:flex">
-                <ShieldCheck size={15} className="text-[#ed0018]" />
-                Approved merchants. Secure payments.
-              </p>
+              <motion.button
+                type="button"
+                onClick={() => {
+                  tick();
+                  nextStep();
+                }}
+                whileTap={reduce ? undefined : { scale: 0.98 }}
+                className="group relative flex h-12 min-w-0 flex-1 items-center justify-center gap-3 overflow-hidden rounded-full bg-[#ed0018] px-6 text-sm font-bold text-white shadow-[0_12px_34px_rgba(237,0,24,0.4)] transition-colors duration-200 hover:bg-[#ff1a30] focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-[#ff3b4e]/40 sm:h-14 sm:min-w-[240px] sm:max-w-[320px] sm:gap-4 sm:px-9"
+              >
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-y-0 -left-1/3 w-1/3 -skew-x-12 bg-white/25 opacity-0 transition-all duration-700 group-hover:left-[110%] group-hover:opacity-100"
+                />
+
+                <span className="relative">
+                  {isLast ? "Get started" : "Continue"}
+                </span>
+
+                <ArrowRight
+                  size={19}
+                  className="relative transition-transform duration-200 group-hover:translate-x-1"
+                />
+              </motion.button>
             </div>
-          </div>
+
+            <p className="mt-4 text-[11px] font-semibold tabular-nums tracking-[0.14em] text-white/60">
+              0{step + 1} / 0{SLIDES.length}
+            </p>
+          </section>
         </div>
-      </section>
+
+        {/* Footer */}
+        <footer className="mt-auto hidden shrink-0 items-center justify-between gap-3 border-t border-white/15 pt-4 text-xs font-medium tracking-[0.06em] text-white/65 sm:flex">
+          <span>WakaStore · Nigeria's building materials marketplace</span>
+
+          <span className="flex items-center gap-2">
+            <ShieldCheck size={15} className="text-[#ff3b4e]" />
+            Approved merchants. Secure payments.
+          </span>
+        </footer>
+      </div>
     </main>
   );
 }
